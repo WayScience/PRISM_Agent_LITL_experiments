@@ -1,0 +1,19 @@
+name: dspy-litl-env
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - pip
+  - numpy
+  - pandas
+  - matplotlib
+  - seaborn
+  - jupyter
+  - notebook
+  - pip:
+      - litellm==1.75.8 
+      - openai>=1.100.1 # pin to make compatible with litellm
+      - dspy
+      - pydantic
+      - mem0ai
