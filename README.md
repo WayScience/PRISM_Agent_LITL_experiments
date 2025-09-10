@@ -31,6 +31,9 @@ The goal is to **research how agentic systems can be improved through tool-augme
 ## Roadmap (Tentative)
 
 - [ ] Scaffold repo structure  
+    1. [x] Defined the `agentic_system` and `analysis` compartment.
+    2. [x] Added early stage conda env, pyproject toml and uv lock.
+    3. [] To be decided.
 - [ ] Define minimal DSPy agent with placeholder tool  
 - [ ] Implement first toy experiment  
 - [ ] Expand tool library with academic use cases  
