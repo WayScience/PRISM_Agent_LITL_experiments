@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dspy-litl-agents"
+version = "0.0.1"
+description = "Agentic AI infrastructure with DSPy for LITL-style experiments"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+authors = [{ name = "Weishan Li" }]
+
+# Core dependencies: mirror your conda env, but pip-installable
+dependencies = [
+  "numpy",
+  "pandas",
+  "matplotlib",
+  "seaborn",
+  "jupyter",
+  "notebook",
+  "dspy",
+  "pydantic",
+  "mem0ai",
+  "litellm==1.75.8",
+  "openai>=1.100.1",
+]
+
+[project.optional-dependencies]
+# Development tools (extra beyond your base env)
+dev = [
+  "pytest>=8",
+  "pytest-cov",
+  "ruff",
+  "mypy",
+  "ipykernel",
+]
+
+[tool.setuptools.packages.find]
+where = ["agentic_system/src"]
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.ruff]
+line-length = 100
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+addopts = "-q"
