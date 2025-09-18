@@ -1,6 +1,5 @@
 # DSPy + LITL Agentic AI Sandbox
 
-**Preliminary Repository** – This project is in the early exploratory stage.
 
 ---
 
