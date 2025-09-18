@@ -42,5 +42,4 @@ The goal is to **research how agentic systems can be improved through tool-augme
 
 ## License
 
-This project is licensed under the **BSD 3-Clause License**.  
 See the [LICENSE](LICENSE) file for full details.
