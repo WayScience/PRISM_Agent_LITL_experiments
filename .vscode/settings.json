@@ -6,4 +6,8 @@
       "analysis/src"
     ],
     "jupyter.notebookFileRoot": "${workspaceFolder}"
-}
+    "python.envFile": "${workspaceFolder}/.env",
+    "python.testing.unittestEnabled": false,
+    "python.testing.pytestEnabled": true
+  }
+
