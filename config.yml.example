@@ -1,0 +1,8 @@
+data:
+  depmap_prism: 'PATH/TO/DEPMAP/PRISM/DATA'
+  cell_line_info: 'secondary-screen-cell-line-info.csv'
+  dose_response: 'secondary-screen-dose-response-curve-parameters.csv'
+
+api:
+  openai:
+    key: 'YOUR_API_KEY'
