@@ -152,7 +152,7 @@ class PrismDispatchQueue:
         else:
             self._shuffled = False
 
-    # -------- recereation from configs --------
+    # -------- recreation from configs --------
 
     def to_state(self) -> Dict[str, Any]:
         """Serialize the dispatch state (order, cursor, seed, results)."""
