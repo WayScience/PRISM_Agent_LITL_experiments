@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from typing import Tuple, Optional, Any, List, Union
 
 import pandas as pd
+import numpy as np
 
 @dataclass(frozen=True)
 class PrismKey:
@@ -79,11 +80,18 @@ class PrismLookup:
             raise ValueError(
                 f"Duplicate (drug, cell) keys found; first few: {dups}")
 
-    # --- core API (same as before) ---
-    def ic50(self, drug: str, cell: str) -> Any:
+    def ic50(self, drug: str, cell: str) -> np.float:
+        """
+        Main lookup function returning the IC50 value for a given
+        (drug, cell_line) pair.
+        """
         return self._df.loc[(self._norm(drug), self._norm(cell)), self.ic50_col]
 
     def row(self, drug: str, cell: str) -> pd.Series:
+        """
+        Return the full row for a given (drug, cell_line) pair.
+        Allows for access to other metadata columns.
+        """
         return self._df.loc[(self._norm(drug), self._norm(cell))]
 
     def get(
@@ -92,12 +100,18 @@ class PrismLookup:
             cell: str, 
             default: Optional[Any] = None
         ) -> Optional[Any]:
+        """
+        Safe get method returning default if (drug, cell_line) pair not found.
+        """
         try:
             return self.ic50(drug, cell)
         except KeyError:
             return default
 
     def get_row(self, drug: str, cell: str) -> Optional[pd.Series]:
+        """
+        Safe get method returning None if (drug, cell_line) pair not found.
+        """
         try:
             return self.row(drug, cell)
         except KeyError:
@@ -115,7 +129,6 @@ class PrismLookup:
     def __len__(self) -> int:
         return len(self._df)
 
-    # --- NEW: subsetting ---
     def subset(self, query: Union[str, pd.Series]) -> "PrismLookup":
         """
         Return a new PrismLookup object filtered by a pandas query string or 
@@ -142,7 +155,6 @@ class PrismLookup:
             validate_unique=True,
         )
 
-    # --- NEW: iteration ---
     def __iter__(self):
         """
         Iterate over all entries.
@@ -151,6 +163,5 @@ class PrismLookup:
         for (drug, cell), row in self._df.iterrows():
             yield (drug, cell, row[self.ic50_col], row)
 
-    # --- helper ---
     def _norm(self, s: str) -> str:
         return s.strip().casefold() if self.casefold else s.strip()
