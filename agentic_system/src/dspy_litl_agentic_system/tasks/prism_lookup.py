@@ -80,6 +80,8 @@ class PrismLookup:
             raise ValueError(
                 f"Duplicate (drug, cell) keys found; first few: {dups}")
 
+    # -------- main look up methods --------
+
     def ic50(self, drug: str, cell: str) -> np.float:
         """
         Main lookup function returning the IC50 value for a given
@@ -117,6 +119,8 @@ class PrismLookup:
         except KeyError:
             return None
 
+    # -------- utility methods --------
+
     def contains(self, drug: str, cell: str) -> bool:
         return (self._norm(drug), self._norm(cell)) in self._df.index
 
@@ -128,7 +132,10 @@ class PrismLookup:
 
     def __len__(self) -> int:
         return len(self._df)
-
+    
+    # ------- subsetting and iteration --------
+    # Useful for building condition specific task queues for agentic systems
+    # and lab in the loop history
     def subset(self, query: Union[str, pd.Series]) -> "PrismLookup":
         """
         Return a new PrismLookup object filtered by a pandas query string or 
