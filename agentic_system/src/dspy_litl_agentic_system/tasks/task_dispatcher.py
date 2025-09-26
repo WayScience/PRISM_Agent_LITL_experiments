@@ -68,6 +68,7 @@ class PrismDispatchQueue:
         self._cursor: int = 0
         self._seed: Optional[int] = seed
         self._shuffled: bool = shuffle
+        self._completed: List[Tuple[str, str]] = []  # Track completed items
 
     # -------- core dispatch API --------
     # called by the agentic system orchestrator to get next task
@@ -93,6 +94,7 @@ class PrismDispatchQueue:
             return None
         d, c = self._keys[self._cursor]
         self._cursor += 1
+        self._completed.append((d, c))  # Track completed item
         row = self.lookup.row(d, c)  # always pull from backend
         return DispatchItem(
             drug=d, cell=c, ic50=row[self.lookup.ic50_col], row=row)
@@ -121,6 +123,18 @@ class PrismDispatchQueue:
         """
         return list(self._keys)
     
+    @property
+    def completed_keys(self) -> List[Tuple[str, str]]:
+        """
+        Return list of (drug, cell) keys that have been dispatched.
+        """
+        return list(self._completed)
+
+    @property
+    def completed_count(self) -> int:
+        """Number of items that have been dispatched."""
+        return len(self._completed)
+
     # -------- control --------
     # only reset with shuffling is supported and no rewinding/skipping
     # as we don't anticipate that being useful in agentic system experimetnation
@@ -143,6 +157,7 @@ class PrismDispatchQueue:
         if shuffle is None:
             shuffle = self._shuffled
         self._cursor = 0
+        self._completed = []  # Reset completed tracking
         if shuffle:
             rng = random.Random(seed if seed is not None else self._seed)
             rng.shuffle(self._keys)
@@ -161,6 +176,7 @@ class PrismDispatchQueue:
             "cursor": self._cursor,
             "seed": self._seed,
             "shuffled": self._shuffled,
+            "completed": list(self._completed),
         }
 
     @classmethod
@@ -174,6 +190,7 @@ class PrismDispatchQueue:
         q._cursor = int(state.get("cursor", 0))
         q._shuffled = bool(state.get("shuffled", False))
         q._seed = state.get("seed", None)
+        q._completed = list(state.get("completed", []))
         # validate cursor bounds
         if not (0 <= q._cursor <= len(q._keys)):
             raise ValueError(
