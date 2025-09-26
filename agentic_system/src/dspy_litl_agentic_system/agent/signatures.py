@@ -25,7 +25,7 @@ class PredictIC50DrugCell(dspy.Signature):
     You are given a single drug name that uniquely identifies the drug,
     a single cell line name that uniquely identifies the cell line,
     and optionally an experimental description that provides
-    additional context about the assay.
+    additional context about the assay. 
 
     If available, additional tools can be used to look up more information 
     about the drug target, mechanism of action, etc. If you would like to 
@@ -44,8 +44,8 @@ class PredictIC50DrugCell(dspy.Signature):
         desc="The unit required for the predicted IC50 value")
     
     ic50_pred: float = dspy.OutputField(
-        desc="Your predicted IC50 value (in nM) for the drug against the target"
-             ", must be a float value strictly greater than 0"
+        desc="Your predicted IC50 value (in `output_unit` scale) for the drug "
+             "against the target, must be a float value strictly greater than 0"
         )
     confidence: int = dspy.OutputField(
         desc="Your confidence in the IC50 prediction, on a scale of 0-100")
