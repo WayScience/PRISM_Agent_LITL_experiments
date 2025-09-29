@@ -6,7 +6,7 @@ from typing import Iterable, Optional
 import os
 import shutil
 
-DEFAULT_MARKERS = (".git", "pyproject.toml", ".gitignore")
+DEFAULT_MARKERS = (".git", ".env", "LICENSE")
 
 def _default_start() -> Path:
     # Prefer the file's directory when running a .py (including nbconvert output)
