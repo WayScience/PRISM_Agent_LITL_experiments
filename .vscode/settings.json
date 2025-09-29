@@ -1,0 +1,9 @@
+// .vscode/settings.json
+{
+    "python.envFile": "${workspaceFolder}/.env",
+    "python.analysis.extraPaths": [
+      "agentic_system/src",
+      "analysis/src"
+    ],
+    "jupyter.notebookFileRoot": "${workspaceFolder}"
+}
