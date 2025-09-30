@@ -1,0 +1,53 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://example.org/depmap-config.schema.json",
+    "title": "DepMap/PRISM pipeline config",
+    "type": "object",
+    "additionalProperties": true,
+    "required": ["data", "api"],
+    "properties": {
+      "data": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["depmap_prism", "cell_line_info", "dose_response"],
+        "properties": {
+          "depmap_prism": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Base directory containing the PRISM assets"
+          },
+          "cell_line_info": {
+            "type": "string",
+            "minLength": 1,
+            "description": "CSV filename under depmap_prism"
+          },
+          "dose_response": {
+            "type": "string",
+            "minLength": 1,
+            "description": "CSV filename under depmap_prism"
+          }
+        }
+      },
+      "api": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["openai"],
+        "properties": {
+          "openai": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key"],
+            "properties": {
+              "key": {
+                "type": "string",
+                "minLength": 1,
+                "description": "OpenAI API key (use env var in prod)",
+                "pattern": "^[A-Za-z0-9_\\-\\.\\{\\}\\$]+$"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  
