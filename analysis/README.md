@@ -14,11 +14,13 @@ This file specifies data paths and API credentials needed for the analysis.
 
 Please refer to `config.yml.template` for guidance on how the file should be formatted.
 
-### `0.1.WRANGLE_DEPMAP_PRISM_DATA.ipynb`
+### `0.data_wrangling` 
+- `0.1.WRANGLE_DEPMAP_PRISM_DATA.ipynb` 
 
-Preprocesses the raw DepMap PRISM secondary drug repurposing dataset to produce a clean, deduplicated table of drug-cell line-IC50 values. The script handles deduplication of overlapping entries between the HTS002 and MTS010 screens, prioritizing MTS010 results and highest-quality curve fits (r²).
+    Preprocesses the raw DepMap PRISM secondary drug repurposing dataset to produce a clean, deduplicated table of drug-cell line-IC50 values. 
+    The script handles deduplication of overlapping entries between the HTS002 and MTS010 screens, prioritizing MTS010 results and highest-quality curve fits (r²).
 
-**Output:** `data/processed/processed_depmap_prism_ic50.csv` - cleaned dataset with unique (cell line, drug) combinations ready for downstream analysis.
+    **Output:** `data/processed/processed_depmap_prism_ic50.csv` - cleaned dataset with unique (cell line, drug) combinations ready for downstream analysis.
 
 ---
 
