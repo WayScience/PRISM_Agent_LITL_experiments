@@ -1,3 +1,17 @@
+"""
+task_dispatcher.py
+
+Implements a dispatch queue for (drug, cell) tasks from a PrismLookup.
+Useful for orchestrating agentic systems that process drug-cell pairs
+in a controlled order, with optional shuffling and progress tracking, 
+so we can observe the effects of task order on outcomes and how
+an agent may improve over task iterations given feedback and calibration.
+
+Classes:
+- DispatchItem: Immutable data class representing a single dispatch item.
+- PrismDispatchQueue: Main class for managing the dispatch queue.
+"""
+
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Tuple, Optional, Any, Dict, Iterable
