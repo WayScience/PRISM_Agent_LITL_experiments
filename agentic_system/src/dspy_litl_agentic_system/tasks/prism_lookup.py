@@ -156,12 +156,21 @@ class PrismLookup:
             return False
 
     def keys(self) -> List[Tuple[str, str]]:
+        """
+        Return all (drug, cell_line) pairs as a list of tuples.
+        """
         return self._df.index.to_list()
 
     def to_frame(self) -> pd.DataFrame:
+        """
+        Return the underlying dataframe.
+        """
         return self._df
 
     def __len__(self) -> int:
+        """
+        Return the number of (drug, cell_line) pairs in the lookup.
+        """
         return len(self._df)
     
     # ------- subsetting and iteration --------
