@@ -1,7 +1,7 @@
 # Big preprocessing output
 /data/processed/processed_depmap_prism_ic50.csv
 
-# Actual config.yml
+# Configuration file for experiments
 config.yml
 
 # Byte-compiled / optimized / DLL files
