@@ -5,6 +5,8 @@ import random
 
 import pandas as pd
 
+from .prism_lookup import PrismLookup
+
 @dataclass(frozen=True)
 class DispatchItem:
     drug: str
@@ -26,7 +28,7 @@ class PrismDispatchQueue:
 
     def __init__(
         self,
-        lookup,  # PrismLookup
+        lookup: PrismLookup,
         order: Optional[Iterable[Tuple[str, str]]] = None,
         shuffle: bool = False,
         seed: Optional[int] = None,
@@ -43,7 +45,7 @@ class PrismDispatchQueue:
         :param seed: Optional random seed for deterministic shuffling.
         """
 
-        self.lookup = lookup
+        self.lookup: PrismLookup = lookup
         # materialize keys from lookup to lock an initial ordering
         # later to be optionally shuffled
         keys = list(order) if order is not None else list(self.lookup.keys())
@@ -51,7 +53,7 @@ class PrismDispatchQueue:
         # drop unknown keys if a custom order was provided
         if order is not None:
             unknown = [
-                (d, c) for (d, c) in keys if not self.lookup.contains(d, c)]
+                (d, c) for (d, c) in keys if not (d, c) in self.lookup]
             if unknown:
                 error_msg = f"These (drug, cell) keys are not in the lookup: {unknown[:5]}"
                 if len(unknown) > 5:
