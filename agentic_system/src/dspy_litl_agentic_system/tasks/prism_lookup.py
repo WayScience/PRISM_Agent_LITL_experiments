@@ -140,8 +140,20 @@ class PrismLookup:
 
     # -------- utility methods --------
 
-    def contains(self, drug: str, cell: str) -> bool:
-        return (self._norm(drug), self._norm(cell)) in self._df.index
+    def __contains__(self, key: Union[Tuple[str, str], PrismKey]) -> bool:
+        """
+        Check if (drug, cell) pair exists in the lookup.
+        Supports both tuple and PrismKey inputs.
+        Usage: (drug, cell) in lookup or PrismKey(drug, cell) in lookup
+        """
+        if isinstance(key, PrismKey):
+            normalized_key = key.norm(self.casefold)
+            return (normalized_key.drug, normalized_key.cell) in self._df.index
+        elif isinstance(key, tuple) and len(key) == 2:
+            drug, cell = key
+            return (self._norm(drug), self._norm(cell)) in self._df.index
+        else:
+            return False
 
     def keys(self) -> List[Tuple[str, str]]:
         return self._df.index.to_list()
