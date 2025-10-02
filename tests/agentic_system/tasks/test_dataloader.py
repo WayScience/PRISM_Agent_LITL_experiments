@@ -144,9 +144,9 @@ class TestPrismLookup:
         assert row is None
     
     def test_contains(self, sample_lookup):
-        assert sample_lookup.contains("DrugA", "CellX") is True
-        assert sample_lookup.contains("DrugD", "CellX") is True 
-        assert sample_lookup.contains("NonExistent", "CellX") is False
+        assert ("DrugA", "CellX") in sample_lookup
+        assert ("DrugD", "CellX") in sample_lookup
+        assert ("NonExistent", "CellX") not in sample_lookup
     
     def test_keys(self, sample_lookup):
         keys = sample_lookup.keys()
@@ -167,13 +167,13 @@ class TestPrismLookup:
         # Should work with different cases
         assert casefold_lookup.ic50("druga", "cellx") == 1.5
         assert casefold_lookup.ic50("DRUGA", "CELLX") == 1.5
-        assert casefold_lookup.contains("DrUgA", "CeLlX") is True
+        assert ("DrUgA", "CeLlX") in casefold_lookup
     
     def test_subset_with_query_string(self, sample_lookup):
         subset = sample_lookup.subset("ic50 > 2.0")
         assert len(subset) == 2  # DrugB and DrugD
-        assert subset.contains("DrugB", "CellY")
-        assert subset.contains("DrugD", "CellX")
+        assert ("DrugB", "CellY") in subset
+        assert ("DrugD", "CellX") in subset
     
     def test_subset_with_boolean_mask(self, sample_lookup):
         df = sample_lookup.to_frame().reset_index()

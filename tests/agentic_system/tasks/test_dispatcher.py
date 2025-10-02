@@ -36,6 +36,12 @@ class FakePrismLookup:
         if (drug, cell) not in self._data:
             raise KeyError(f"Key ({drug}, {cell}) not found")
         return self._data[(drug, cell)]
+    
+    def __contains__(self, key) -> bool:
+        """Support 'in' operator for compatibility with PrismLookup.__contains__"""
+        if isinstance(key, tuple) and len(key) == 2:
+            return key in self._data
+        return False
 
 
 class TestPrismDispatchQueue:
