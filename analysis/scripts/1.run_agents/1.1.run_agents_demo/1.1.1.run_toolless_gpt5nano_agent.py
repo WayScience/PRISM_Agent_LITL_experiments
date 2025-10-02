@@ -33,6 +33,7 @@ from pathlib import Path
 import yaml
 import os
 
+from tqdm import tqdm
 import pandas as pd
 import dspy
 import matplotlib.pyplot as plt
@@ -42,6 +43,13 @@ from dspy_litl_agentic_system.tasks.task_dispatcher import PrismDispatchQueue
 from dspy_litl_agentic_system.agent.signatures import PredictIC50DrugCell
 from dspy_litl_agentic_system.agent.trace_unit import TraceUnit
 from dspy_litl_agentic_system.utils.jsonl_log import append_jsonl
+from nbutils.pathing import repo_root
+from nbutils.utils import IN_NOTEBOOK
+
+if IN_NOTEBOOK:
+    print("Running in IPython shell")
+else:
+    print("Running in standard Python shell")
 
 
 # ### Parameters
@@ -168,6 +176,8 @@ agent = dspy.Predict(
 
 
 # ### Loop across the subset of drugs and predict IC50 values
+# The run will be very quick as DSPy caches the lm output, 
+# when running for the first time this can take 10-20 mintues.
 
 # In[7]:
 
@@ -181,8 +191,13 @@ representation += ';'.join(f"{key}={val}" \
 
 log_file = log_path / f"{representation}.jsonl"
 trace = OrderedDict()
+n_range = range(_n)
 
-for i in range(_n):
+for i in tqdm(
+    n_range, 
+    desc="Running Agentic Predictions over Queue of Drugs",
+    total=_n
+    ):
 
     dispatch_item = dispatcher.dispatch()
     trace_unit = TraceUnit(
@@ -210,8 +225,6 @@ for i in range(_n):
 
     # Log after each step for validation
     append_jsonl(log_file, record=trace_unit.model_dump())
-
-    print(f"Processed {i+1}/{_n}: {trace_unit.drug}")
 
 
 # ### Compute fold error and plot
@@ -246,5 +259,17 @@ plt.title(f'Fold Error of IC50 Predictions for {CCLE_NAME}')
 plt.legend()
 plt.grid(True, which="both", ls="--", linewidth=0.5)
 plt.tight_layout()
-plt.show()
+
+if IN_NOTEBOOK:
+    plt.show()
+else:
+    print("Not in a notebook environment. Skipping plot display")
+
+out_dir = repo_root() / "output" / "figures" / "demo"
+out_dir.mkdir(parents=True, exist_ok=True)
+out_path = out_dir / "toolless_gpt5-nano_demo.png"
+
+plt.savefig(out_path, dpi=300)
+
+plt.close()
 
