@@ -245,20 +245,20 @@ for _, trace_unit in trace.items():
         )
     )
 
-plt.figure(figsize=(6,6))
-plt.scatter(
+fig, ax = plt.subplots(figsize=(6, 6))
+ax.scatter(
     x=range(len(fold_errs)),
     y=fold_errs,
     alpha=0.7
 )
-plt.yscale('log')
-plt.axhline(y=1, color='r', linestyle='--', label='Perfect Prediction')
-plt.xlabel('Sample Index')
-plt.ylabel('Fold Error (lower is better)')
-plt.title(f'Fold Error of IC50 Predictions for {CCLE_NAME}')
-plt.legend()
-plt.grid(True, which="both", ls="--", linewidth=0.5)
-plt.tight_layout()
+ax.set_yscale('log')
+ax.axhline(y=1, linestyle='--', label='Perfect Prediction', zorder=2)
+ax.set_xlabel('Sample Index')
+ax.set_ylabel('Fold Error (lower is better)')
+ax.set_title(f'Fold Error of IC50 Predictions for {CCLE_NAME}')
+ax.grid(True, which="both", ls="--", linewidth=0.5)
+ax.legend()
+fig.tight_layout()
 
 if IN_NOTEBOOK:
     plt.show()
@@ -269,7 +269,6 @@ out_dir = repo_root() / "output" / "figures" / "demo"
 out_dir.mkdir(parents=True, exist_ok=True)
 out_path = out_dir / "toolless_gpt5-nano_demo.png"
 
-plt.savefig(out_path, dpi=300)
-
-plt.close()
+fig.savefig(out_path, dpi=300, bbox_inches='tight')
+plt.close(fig)
 
