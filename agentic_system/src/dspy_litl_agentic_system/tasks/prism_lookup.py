@@ -56,6 +56,25 @@ class PrismLookup:
         casefold: bool = False,
         validate_unique: bool = True,
     ):
+        """
+        Initialize the PrismLookup with dataframe and specified column names.
+        Default parameters work directly with depmap PRISM secondary screen.
+
+        :param df: drug screening dataframe, e.g. depmap PRISM secondary screen.
+        :param drug_col: Column name for drug identifiers. 
+            Should uniquely identify drugs in the dataframe.
+            Default is "drug" and works with depmap PRISM secondary screen.
+        :param cell_col: Column name for cell line identifiers.
+            Should uniquely identify cell lines in the dataframe.
+            Default is "cell_line" and works with depmap PRISM secondary screen.
+        :param ic50_col: Column name for IC50 values.
+            Default is "ic50"
+        :param casefold: Whether to casefold drug and cell line names
+            for case insensitive lookups. Default is False.
+        :param validate_unique: Whether to validate that (drug, cell_line)
+            pairs are unique in the dataframe. Default is True.
+        Raises ValueError if duplicates found.
+        """
         self.drug_col = drug_col
         self.cell_col = cell_col
         self.ic50_col = ic50_col
