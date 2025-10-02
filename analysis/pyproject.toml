@@ -1,0 +1,13 @@
+[project]
+name = "nbutils"
+version = "0.1.0"
+description = "Notebook-only utilities for this repo"
+requires-python = ">=3.9"
+authors = [{ name = "Weishan Li" }]
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
