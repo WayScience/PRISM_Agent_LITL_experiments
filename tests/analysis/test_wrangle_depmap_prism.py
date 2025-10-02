@@ -12,7 +12,10 @@ def test_wrangle_depmap_prism_script_runs():
         ["git", "rev-parse", "--show-toplevel"], text=True
     ).strip()
     repo_root = pathlib.Path(repo_root)
-    script_path = repo_root / "analysis" / "0.data_wrangling" / "nbconverted" / "0.1.wrangle_depmap_prism_data.py"
+    script_path = repo_root / "analysis" /\
+        "scripts" /\
+            "0.data_wrangling" /\
+                "0.1.wrangle_depmap_prism_data.py"
 
     # Run from repo root so `git rev-parse --show-toplevel` and config.yml resolve
     result = subprocess.run(
@@ -23,4 +26,6 @@ def test_wrangle_depmap_prism_script_runs():
         env={**os.environ},  # inherit env
     )
 
-    assert result.returncode == 0, f"Script failed:\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
+    assert result.returncode == 0, (
+        f"Script failed:\n"
+        f"STDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}")
