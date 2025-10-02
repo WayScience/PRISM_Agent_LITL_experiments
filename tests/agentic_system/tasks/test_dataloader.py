@@ -155,7 +155,7 @@ class TestPrismLookup:
         assert ("DrugD", "CellX") in keys  # Should be stripped
     
     def test_to_frame(self, sample_lookup):
-        df = sample_lookup.to_frame()
+        df = sample_lookup.get_frame()
         assert isinstance(df, pd.DataFrame)
         assert len(df) == 5
         assert df.index.names == ["drug", "cell_line"]
@@ -176,14 +176,14 @@ class TestPrismLookup:
         assert ("DrugD", "CellX") in subset
     
     def test_subset_with_boolean_mask(self, sample_lookup):
-        df = sample_lookup.to_frame().reset_index()
+        df = sample_lookup.get_frame().reset_index()
         mask = df['drug'].str.contains('Drug[AB]')
         subset = sample_lookup.subset(mask)
         
         assert len(subset) == 3  # DrugA (2 entries) + DrugB (1 entry)
     
     def test_subset_with_dataframe(self, sample_lookup):
-        df = sample_lookup.to_frame().reset_index()
+        df = sample_lookup.get_frame().reset_index()
         filtered_df = df[df['ic50'] < 2.0]
         subset = sample_lookup.subset(filtered_df)
         

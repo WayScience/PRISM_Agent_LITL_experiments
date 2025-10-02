@@ -161,7 +161,7 @@ class PrismLookup:
         """
         return self._df.index.to_list()
 
-    def to_frame(self) -> pd.DataFrame:
+    def get_frame(self) -> pd.DataFrame:
         """
         Return the underlying dataframe.
         """
