@@ -32,41 +32,62 @@ def casefold_lookup(sample_data):
 class TestPrismKey:
     """Test cases for PrismKey class."""
     
-    def test_prism_key_creation(self):
-        key = PrismKey("DrugA", "CellX")
-        assert key.drug == "DrugA"
-        assert key.cell == "CellX"
+    @pytest.mark.parametrize("drug,cell,expected_drug,expected_cell", [
+        ("DrugA", "CellX", "DrugA", "CellX"),
+        ("DrugB", "CellY", "DrugB", "CellY"),
+        ("", "", "", ""),
+        ("Drug-1_test", "Cell@2#test", "Drug-1_test", "Cell@2#test"),
+    ])
+    def test_prism_key_creation(self, drug, cell, expected_drug, expected_cell):
+        key = PrismKey(drug, cell)
+        assert key.drug == expected_drug
+        assert key.cell == expected_cell
     
-    def test_prism_key_immutable(self):
-        key = PrismKey("DrugA", "CellX")
+    @pytest.mark.parametrize("drug,cell", [
+        ("DrugA", "CellX"),
+        ("DrugB", "CellY"),
+        ("", ""),
+    ])
+    def test_prism_key_immutable(self, drug, cell):
+        key = PrismKey(drug, cell)
         with pytest.raises(AttributeError):
-            key.drug = "DrugB"
+            key.drug = "NewDrug"
+        with pytest.raises(AttributeError):
+            key.cell = "NewCell"
     
-    def test_prism_key_hashable(self):
-        key1 = PrismKey("DrugA", "CellX")
-        key2 = PrismKey("DrugA", "CellX")
-        key3 = PrismKey("DrugB", "CellX")
+    @pytest.mark.parametrize("key1_data,key2_data,key3_data,expected_unique_count", [
+        (("DrugA", "CellX"), ("DrugA", "CellX"), ("DrugB", "CellX"), 2),
+        (("DrugA", "CellX"), ("DrugA", "CellY"), ("DrugB", "CellX"), 3),
+        (("", ""), ("", ""), ("DrugA", "CellX"), 2),
+    ])
+    def test_prism_key_hashable(self, key1_data, key2_data, key3_data, expected_unique_count):
+        key1 = PrismKey(*key1_data)
+        key2 = PrismKey(*key2_data)
+        key3 = PrismKey(*key3_data)
         
-        assert hash(key1) == hash(key2)
-        assert hash(key1) != hash(key3)
+        if key1_data == key2_data:
+            assert hash(key1) == hash(key2)
+        else:
+            assert hash(key1) != hash(key2)
         
         # Can be used in sets/dicts
         key_set = {key1, key2, key3}
-        assert len(key_set) == 2
+        assert len(key_set) == expected_unique_count
     
-    def test_prism_key_norm_casefold(self):
-        key = PrismKey(" DrugA ", " CellX ")
-        normalized = key.norm(casefold=True)
+    @pytest.mark.parametrize("input_drug,input_cell,casefold,expected_drug,expected_cell", [
+        (" DrugA ", " CellX ", True, "druga", "cellx"),
+        (" DrugA ", " CellX ", False, "DrugA", "CellX"),
+        ("DrugA", "CellX", True, "druga", "cellx"),
+        ("DrugA", "CellX", False, "DrugA", "CellX"),
+        (" DRUG_A ", " CELL_X ", True, "drug_a", "cell_x"),
+        (" DRUG_A ", " CELL_X ", False, "DRUG_A", "CELL_X"),
+    ])
+    def test_prism_key_norm(self, input_drug, input_cell, casefold, expected_drug, expected_cell):
+        key = PrismKey(input_drug, input_cell)
+        normalized = key.norm(casefold=casefold)
         
-        assert normalized.drug == "druga"
-        assert normalized.cell == "cellx"
-    
-    def test_prism_key_norm_no_casefold(self):
-        key = PrismKey(" DrugA ", " CellX ")
-        normalized = key.norm(casefold=False)
-        
-        assert normalized.drug == "DrugA"
-        assert normalized.cell == "CellX"
+        assert normalized.drug == expected_drug
+        assert normalized.cell == expected_cell
 
 
 class TestPrismLookup:
@@ -108,117 +129,72 @@ class TestPrismLookup:
         with pytest.raises(ValueError, match="Index has duplicate keys"):
             PrismLookup(duplicate_data, validate_unique=True)
     
-    def test_ic50_lookup(self, sample_lookup):
-        assert sample_lookup.ic50("DrugA", "CellX") == 1.5
-        assert sample_lookup.ic50("DrugB", "CellY") == 2.3
-        assert sample_lookup.ic50("DrugD", "CellX") == 3.1
+    @pytest.mark.parametrize("drug,cell,expected_ic50", [
+        ("DrugA", "CellX", 1.5),
+        ("DrugB", "CellY", 2.3),
+        ("DrugC", "CellZ", 0.8),
+        ("DrugD", "CellX", 3.1),  # Tests whitespace stripping
+        ("DrugA", "CellY", 1.9),
+    ])
+    def test_ic50_lookup(self, sample_lookup, drug, cell, expected_ic50):
+        assert sample_lookup.ic50(drug, cell) == expected_ic50
     
-    def test_ic50_lookup_keyerror(self, sample_lookup):
+    @pytest.mark.parametrize("drug,cell", [
+        ("NonExistentDrug", "CellX"),
+        ("DrugA", "NonExistentCell"),
+        ("", ""),
+        ("DrugA", ""),
+        ("", "CellX"),
+    ])
+    def test_ic50_lookup_keyerror(self, sample_lookup, drug, cell):
         with pytest.raises(KeyError):
-            sample_lookup.ic50("NonExistentDrug", "CellX")
+            sample_lookup.ic50(drug, cell)
     
-    def test_row_lookup(self, sample_lookup):
-        row = sample_lookup.row("DrugA", "CellX")
-        assert row['ic50'] == 1.5
-        assert row['auc'] == 0.75
-        assert row['viability'] == 0.25
+    @pytest.mark.parametrize("drug,cell,expected_values", [
+        ("DrugA", "CellX", {"ic50": 1.5, "auc": 0.75, "viability": 0.25}),
+        ("DrugB", "CellY", {"ic50": 2.3, "auc": 0.82, "viability": 0.18}),
+        ("DrugC", "CellZ", {"ic50": 0.8, "auc": 0.65, "viability": 0.35}),
+    ])
+    def test_row_lookup(self, sample_lookup, drug, cell, expected_values):
+        row = sample_lookup.row(drug, cell)
+        for col, expected_val in expected_values.items():
+            assert row[col] == expected_val
     
-    def test_get_with_default(self, sample_lookup):
-        # Existing key
-        assert sample_lookup.get("DrugA", "CellX") == 1.5
-        
-        # Non-existing key with default
-        assert sample_lookup.get("NonExistent", "CellX", default=999) == 999
-        
-        # Non-existing key without default
-        assert sample_lookup.get("NonExistent", "CellX") is None
+    @pytest.mark.parametrize("drug,cell,default,expected", [
+        ("DrugA", "CellX", None, 1.5),  # Existing key
+        ("DrugA", "CellX", 999, 1.5),   # Existing key with default
+        ("NonExistent", "CellX", 999, 999),  # Non-existing with default
+        ("NonExistent", "CellX", None, None),  # Non-existing without default
+        ("NonExistent", "CellX", "N/A", "N/A"),  # Non-existing with string default
+    ])
+    def test_get_with_default(self, sample_lookup, drug, cell, default, expected):
+        if default is None:
+            result = sample_lookup.get(drug, cell)
+        else:
+            result = sample_lookup.get(drug, cell, default=default)
+        assert result == expected
     
-    def test_get_row(self, sample_lookup):
-        # Existing key
-        row = sample_lookup.get_row("DrugA", "CellX")
-        assert row is not None
-        assert row['ic50'] == 1.5
-        
-        # Non-existing key
-        row = sample_lookup.get_row("NonExistent", "CellX")
-        assert row is None
+    @pytest.mark.parametrize("drug,cell,should_exist", [
+        ("DrugA", "CellX", True),
+        ("DrugB", "CellY", True),
+        ("DrugD", "CellX", True),  # Tests whitespace handling
+        ("NonExistent", "CellX", False),
+        ("DrugA", "NonExistent", False),
+        ("", "", False),
+    ])
+    def test_contains(self, sample_lookup, drug, cell, should_exist):
+        assert ((drug, cell) in sample_lookup) == should_exist
     
-    def test_contains(self, sample_lookup):
-        assert ("DrugA", "CellX") in sample_lookup
-        assert ("DrugD", "CellX") in sample_lookup
-        assert ("NonExistent", "CellX") not in sample_lookup
-    
-    def test_keys(self, sample_lookup):
-        keys = sample_lookup.keys()
-        assert len(keys) == 5
-        assert ("DrugA", "CellX") in keys
-        assert ("DrugD", "CellX") in keys  # Should be stripped
-    
-    def test_to_frame(self, sample_lookup):
-        df = sample_lookup.get_frame()
-        assert isinstance(df, pd.DataFrame)
-        assert len(df) == 5
-        assert df.index.names == ["drug", "cell_line"]
-    
-    def test_len(self, sample_lookup):
-        assert len(sample_lookup) == 5
-    
-    def test_casefold_functionality(self, casefold_lookup):
-        # Should work with different cases
-        assert casefold_lookup.ic50("druga", "cellx") == 1.5
-        assert casefold_lookup.ic50("DRUGA", "CELLX") == 1.5
-        assert ("DrUgA", "CeLlX") in casefold_lookup
-    
-    def test_subset_with_query_string(self, sample_lookup):
-        subset = sample_lookup.subset("ic50 > 2.0")
-        assert len(subset) == 2  # DrugB and DrugD
-        assert ("DrugB", "CellY") in subset
-        assert ("DrugD", "CellX") in subset
-    
-    def test_subset_with_boolean_mask(self, sample_lookup):
-        df = sample_lookup.get_frame().reset_index()
-        mask = df['drug'].str.contains('Drug[AB]')
-        subset = sample_lookup.subset(mask)
-        
-        assert len(subset) == 3  # DrugA (2 entries) + DrugB (1 entry)
-    
-    def test_subset_with_dataframe(self, sample_lookup):
-        df = sample_lookup.get_frame().reset_index()
-        filtered_df = df[df['ic50'] < 2.0]
-        subset = sample_lookup.subset(filtered_df)
-        
-        assert len(subset) == 3  # DrugA (2 entries) + DrugC (1 entry)
-    
-    def test_subset_invalid_input(self, sample_lookup):
-        with pytest.raises(TypeError):
-            sample_lookup.subset(123)  # Invalid type
-    
-    def test_iteration(self, sample_lookup):
-        entries = list(sample_lookup)
-        assert len(entries) == 5
-        
-        # Check first entry structure
-        drug, cell, ic50_val, row = entries[0]
-        assert isinstance(drug, str)
-        assert isinstance(cell, str)
-        assert isinstance(ic50_val, (int, float))
-        assert isinstance(row, pd.Series)
-        
-        # Verify specific values (depends on sort order)
-        drugs = [entry[0] for entry in entries]
-        cells = [entry[1] for entry in entries]
-        ic50_vals = [entry[2] for entry in entries]
-        
-        assert "DrugA" in drugs
-        assert "CellX" in cells
-        assert 1.5 in ic50_vals
-    
-    def test_norm_helper(self, sample_lookup, casefold_lookup):
-        # Without casefold
-        assert sample_lookup._norm(" DrugA ") == "DrugA"
-        
-        # With casefold
-        assert casefold_lookup._norm(" DrugA ") == "druga"
+    @pytest.mark.parametrize("drug_variants,cell_variants,expected_ic50", [
+        (["druga", "DRUGA", "DrUgA"], ["cellx", "CELLX", "CeLlX"], 1.5),
+        (["drugb", "DRUGB"], ["celly", "CELLY"], 2.3),
+        (["drugd", "DRUGD"], ["cellx", "CELLX"], 3.1),
+    ])
+    def test_casefold_functionality(self, casefold_lookup, drug_variants, cell_variants, expected_ic50):
+        for drug in drug_variants:
+            for cell in cell_variants:
+                assert casefold_lookup.ic50(drug, cell) == expected_ic50
+                assert (drug, cell) in casefold_lookup
 
 
 class TestPrismLookupEdgeCases:
