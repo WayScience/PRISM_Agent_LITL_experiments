@@ -5,30 +5,6 @@ import numpy as np
 from dspy_litl_agentic_system.tasks.prism_lookup import PrismKey, PrismLookup
 
 
-@pytest.fixture
-def sample_data():
-    """Create sample PRISM data for testing."""
-    return pd.DataFrame({
-        'drug': ['DrugA', 'DrugB', 'DrugC', ' DrugD ', 'DrugA'],
-        'cell_line': ['CellX', 'CellY', 'CellZ', 'CellX', 'CellY'],
-        'ic50': [1.5, 2.3, 0.8, 3.1, 1.9],
-        'auc': [0.75, 0.82, 0.65, 0.91, 0.78],
-        'viability': [0.25, 0.18, 0.35, 0.09, 0.22]
-    })
-
-
-@pytest.fixture
-def sample_lookup(sample_data):
-    """Create a PrismLookup instance with sample data."""
-    return PrismLookup(sample_data)
-
-
-@pytest.fixture
-def casefold_lookup(sample_data):
-    """Create a PrismLookup instance with casefold=True."""
-    return PrismLookup(sample_data, casefold=True)
-
-
 class TestPrismKey:
     """Test cases for PrismKey class."""
     

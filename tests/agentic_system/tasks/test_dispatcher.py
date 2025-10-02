@@ -6,58 +6,7 @@ from unittest.mock import Mock
 from dspy_litl_agentic_system.tasks.task_dispatcher import PrismDispatchQueue, DispatchItem
 
 
-class FakePrismLookup:
-    """Mock PrismLookup for testing dispatcher."""
-    
-    def __init__(self, data: List[Tuple[str, str, float]], ic50_col: str = "ic50"):
-        self.ic50_col = ic50_col
-        self._data = {}
-        self._keys = []
-        
-        for drug, cell, ic50 in data:
-            key = (drug, cell)
-            self._keys.append(key)
-            # Create a mock Series with ic50 and some additional columns
-            row_data = {
-                ic50_col: ic50,
-                "drug_name": drug,
-                "cell_line": cell,
-                "other_col": f"data_{drug}_{cell}"
-            }
-            self._data[key] = pd.Series(row_data)
-    
-    def keys(self) -> List[Tuple[str, str]]:
-        return list(self._keys)
-    
-    def contains(self, drug: str, cell: str) -> bool:
-        return (drug, cell) in self._data
-    
-    def row(self, drug: str, cell: str) -> pd.Series:
-        if (drug, cell) not in self._data:
-            raise KeyError(f"Key ({drug}, {cell}) not found")
-        return self._data[(drug, cell)]
-    
-    def __contains__(self, key) -> bool:
-        """Support 'in' operator for compatibility with PrismLookup.__contains__"""
-        if isinstance(key, tuple) and len(key) == 2:
-            return key in self._data
-        return False
-
-
 class TestPrismDispatchQueue:
-    
-    @pytest.fixture
-    def sample_data(self):
-        return [
-            ("drug1", "cell1", 1.5),
-            ("drug2", "cell2", 2.0),
-            ("drug3", "cell3", 0.5),
-            ("drug1", "cell2", 1.8),
-        ]
-    
-    @pytest.fixture
-    def fake_lookup(self, sample_data):
-        return FakePrismLookup(sample_data)
     
     def test_basic_initialization(self, fake_lookup):
         queue = PrismDispatchQueue(fake_lookup)
@@ -268,9 +217,8 @@ class TestPrismDispatchQueue:
         assert queue.index == total
         assert queue.remaining == 0
     
-    def test_empty_lookup(self):
-        empty_lookup = FakePrismLookup([])
-        queue = PrismDispatchQueue(empty_lookup)
+    def test_empty_lookup(self, empty_fake_lookup):
+        queue = PrismDispatchQueue(empty_fake_lookup)
         
         assert queue.total == 0
         assert queue.remaining == 0
