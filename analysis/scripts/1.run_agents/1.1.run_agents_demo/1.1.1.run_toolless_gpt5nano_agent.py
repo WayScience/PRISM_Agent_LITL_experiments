@@ -27,7 +27,6 @@
 # In[1]:
 
 
-import subprocess
 from collections import OrderedDict
 from pathlib import Path
 import yaml
@@ -43,6 +42,7 @@ from dspy_litl_agentic_system.tasks.task_dispatcher import PrismDispatchQueue
 from dspy_litl_agentic_system.agent.signatures import PredictIC50DrugCell
 from dspy_litl_agentic_system.agent.trace_unit import TraceUnit
 from dspy_litl_agentic_system.utils.jsonl_log import append_jsonl
+from dspy_litl_agentic_system.metrics import absolute_error, fold_error
 from nbutils.pathing import project_file, repo_root
 from nbutils.utils import IN_NOTEBOOK
 
@@ -271,35 +271,81 @@ for i in tqdm(
 
 # ### Compute fold error and plot
 # 
-# As anticipated, our agent, without any external tools and memory, does not display improved predictive performance over iterations.
+# As anticipated, our agent, without any external tools and memory, does not display improved predictive performance iterating over the task queue. 
+# There seemed to be a weak negative correlation between confidence and error evidence from the absolute error vs confidence plot. 
 
 # In[8]:
 
 
-fold_errs = []
-eps = 1e-10
-for _, trace_unit in trace.items():
+fold_errs = fold_error(
+    [trace_unit.ic50_true for trace_unit in trace.values()],
+    [trace_unit.ic50_pred for trace_unit in trace.values()],
+    epsilon=1e-10
+)
+abs_errs = absolute_error(
+    [trace_unit.ic50_true for trace_unit in trace.values()],
+    [trace_unit.ic50_pred for trace_unit in trace.values()]
+)
 
-    fold_errs.append(
-        max(
-            trace_unit.ic50_pred / (trace_unit.ic50_true + eps),
-            trace_unit.ic50_true / (trace_unit.ic50_pred + eps)
-        )
-    )
+confidence = [
+    trace_unit.confidence for trace_unit in trace.values()
+]
 
-fig, ax = plt.subplots(figsize=(6, 6))
-ax.scatter(
+fig, axs = plt.subplots(2, 2, figsize=(12, 12))
+
+# Plot Fold Error
+axs[0, 0].scatter(
     x=range(len(fold_errs)),
     y=fold_errs,
     alpha=0.7
 )
-ax.set_yscale('log')
-ax.axhline(y=1, linestyle='--', label='Perfect Prediction', zorder=2)
-ax.set_xlabel('Sample Index')
-ax.set_ylabel('Fold Error (lower is better)')
-ax.set_title(f'Fold Error of IC50 Predictions for {CCLE_NAME}')
-ax.grid(True, which="both", ls="--", linewidth=0.5)
-ax.legend()
+axs[0, 0].set_yscale('log')
+axs[0, 0].axhline(y=1, linestyle='--', label='Perfect Prediction', zorder=2)
+axs[0, 0].set_xlabel('Queue Index')
+axs[0, 0].set_ylabel('Fold Error (lower is better)')
+axs[0, 0].set_title(f'Fold Error of IC50 Predictions for {CCLE_NAME}')
+axs[0, 0].grid(True, which="both", ls="--", linewidth=0.5)
+axs[0, 0].legend()
+
+# Plot Absolute Error
+axs[0, 1].scatter(
+    x=range(len(abs_errs)),
+    y=abs_errs,
+    alpha=0.7,
+    color='orange'
+)
+axs[0, 1].set_yscale('log')
+axs[0, 1].set_xlabel('Queue Index')
+axs[0, 1].set_ylabel('Absolute Error')
+axs[0, 1].set_title(f'Absolute Error of IC50 Predictions for {CCLE_NAME}')
+axs[0, 1].grid(True, which="both", ls="--", linewidth=0.5)
+
+# Plot Fold Error vs Confidence
+axs[1, 0].scatter(
+    x=confidence,
+    y=fold_errs,
+    alpha=0.7,
+    color='green'
+)
+axs[1, 0].set_yscale('log')
+axs[1, 0].set_xlabel('Confidence')
+axs[1, 0].set_ylabel('Fold Error (lower is better)')
+axs[1, 0].set_title(f'Fold Error vs Confidence for {CCLE_NAME}')
+axs[1, 0].grid(True, which="both", ls="--", linewidth=0.5)
+
+# Plot Absolute Error vs Confidence
+axs[1, 1].scatter(
+    x=confidence,
+    y=abs_errs,
+    alpha=0.7,
+    color='purple'
+)
+axs[1, 1].set_yscale('log')
+axs[1, 1].set_xlabel('Confidence')
+axs[1, 1].set_ylabel('Absolute Error')
+axs[1, 1].set_title(f'Absolute Error vs Confidence for {CCLE_NAME}')
+axs[1, 1].grid(True, which="both", ls="--", linewidth=0.5)
+
 fig.tight_layout()
 
 if IN_NOTEBOOK:
