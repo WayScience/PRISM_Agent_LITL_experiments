@@ -72,7 +72,12 @@ SHUFFLE_QUEUE = True
 SHUFFLE_SEED = 42
 LM_CONFIG = {
     "model": "openai/gpt-5-nano", # small model for demo
-    "temperature": 1.0,
+    # Controls the randomness of the model's output (add variability to 
+    # next token sampling). Lower values make the output more
+    # deterministic, while higher values increase randomness.
+    # A value of 1.0 is used here 
+    # for the demo, balancing creativity and determinism.
+    "temperature": 1.0, 
     "max_tokens": 20000,
     "seed": 42
 }
