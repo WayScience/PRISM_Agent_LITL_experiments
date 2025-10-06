@@ -22,10 +22,12 @@
 
 import pathlib
 import yaml
+import json
 
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
+from jsonschema import Draft7Validator
 
 from nbutils.pathing import project_file, repo_root
 from nbutils.utils import IN_NOTEBOOK
@@ -45,50 +47,54 @@ else:
 # works only when vscode settings configuring 
 # "jupyter.notebookFileRoot": "${workspaceFolder}" 
 config_path = project_file("config.yml")
+schema_path = project_file("config.schema.json")
 
 if not config_path.exists():
     raise FileNotFoundError(f"Config file not found at: {config_path}")
+if not schema_path.exists():
+    raise FileNotFoundError(f"Schema file not found at: {schema_path}")
 
-# --- Step 2: Load config.yml ---
+# --- Step 2: Load config.yml and schema ---
 with open(config_path, "r") as f:
     config = yaml.safe_load(f)
 
-# --- Step 3: Validate data section ---
-data_cfg = config.get("data")
-if not data_cfg:
-    raise ValueError("Missing 'data' section in config.yml")
+with open(schema_path, "r") as f:
+    schema = json.load(f)
 
-# Required keys
-required_keys = ["depmap_prism", "cell_line_info", "dose_response"]
+# --- Step 3: Validate data section ---
+validator = Draft7Validator(schema)
+schema_errors = sorted(validator.iter_errors(config), key=lambda e: e.path)
+
+if schema_errors:
+    msg_lines = ["Config schema validation failed:"]
+    for err in schema_errors:
+        loc = "/".join(str(p) for p in err.path) or "<root>"
+        msg_lines.append(f"- at `{loc}`: {err.message}")
+    raise ValueError("\n".join(msg_lines))
 
 # --- Step 4: Collect resolved paths ---
-results = []
-errors = []  # collect problems for later
-for key in required_keys:
-    value = data_cfg.get(key)
-    if value is None:
-        results.append((key, None, "Missing in config"))
-        errors.append(f"Config key '{key}' is missing")
-        continue
+data_cfg = config["data"]
 
-    # depmap_prism is a directory, the others are files inside it
-    if key == "depmap_prism":
-        full_path = pathlib.Path(value)
-    else:
-        full_path = pathlib.Path(data_cfg["depmap_prism"]) / value
+# Build resolved paths
+base_dir = pathlib.Path(data_cfg["depmap_prism"])
+paths = {
+    "depmap_prism": base_dir,
+    "cell_line_info": base_dir / data_cfg["cell_line_info"],
+    "dose_response": base_dir / data_cfg["dose_response"],
+}
 
-    if full_path.exists():
-        status = "Exists"
-    else:
-        status = "Not found"
-        errors.append(f"Path for '{key}' does not exist: {full_path}")
-
-    results.append((key, str(full_path), status))
+rows, errors = [], []
+for k, p in paths.items():
+    status = "Exists" if p.exists() else "Not found"
+    rows.append((k, str(p.resolve()), status))
+    if status != "Exists":
+        if k == "depmap_prism":
+            errors.append(f"Directory missing: {p}")
+        else:
+            errors.append(f"File missing for '{k}': {p}")
 
 # --- Step 5: Display summary nicely ---
-config_df = pd.DataFrame(
-    results, columns=["Config Key", "Resolved Path", "Status"])
-config_df.set_index("Config Key", inplace=True)
+config_df = pd.DataFrame(rows, columns=["Config Key", "Resolved Path", "Status"]).set_index("Config Key")
 print(config_df)
 
 # --- Step 6: Fail if any errors were collected ---
@@ -236,64 +242,76 @@ print(grouped_counts.head(20))
 # In[8]:
 
 
+unique_counts = grouped_counts.groupby('primary_tissue')[
+    'ccle_name'].nunique().reset_index(name='unique_ccle_count')
+
+# grouped_counts: columns = ['primary_tissue', 'ccle_name', 'count']
+# unique_counts:  columns = ['primary_tissue', 'unique_ccle_count']
+
+# 1) Pick a consistent tissue order
+order = (grouped_counts.groupby('primary_tissue')['count']
+        .median().sort_values(ascending=False).index)
+
+# limit to top-N tissues to keep the x-axis readable
+TOP_N = 20
+if TOP_N is not None:
+    keep = list(order[:TOP_N])
+    grouped_counts = grouped_counts[
+        grouped_counts['primary_tissue'].isin(keep)]
+    unique_counts  = unique_counts[
+        unique_counts['primary_tissue'].isin(keep)]
+    order = [t for t in order if t in keep]
+
+# Ensure the bottom bar data follows the same order
+unique_counts = unique_counts.set_index('primary_tissue').reindex(order).\
+    reset_index()
+
+# 2) Make vertically stacked subplots with a shared x-axis
+fig, (ax_top, ax_bot) = plt.subplots(
+    2, 1, figsize=(14, 9), sharex=True,
+    gridspec_kw={'height_ratios': [2, 1]}
+)
+
+# --- Top: distribution per tissue (box + dots) ---
+sns.boxplot(
+    data=grouped_counts, 
+    x='primary_tissue', 
+    y='count', 
+    order=order, 
+    ax=ax_top)
+sns.stripplot(data=grouped_counts, x='primary_tissue', y='count',
+            order=order, ax=ax_top, jitter=True, alpha=0.5)
+ax_top.set_xlabel('')
+ax_top.set_ylabel('# (molecule, cell line) combos')
+ax_top.set_title('Distribution of combos per cell line within each tissue')
+
+# --- Bottom: number of unique cell lines per tissue (bar) ---
+sns.barplot(data=unique_counts, x='primary_tissue', y='unique_ccle_count',
+            order=order, ax=ax_bot)
+ax_bot.set_xlabel('Primary tissue')
+ax_bot.set_ylabel('# unique CCLE names')
+
+# Rotate x labels only on the bottom axis
+for label in ax_bot.get_xticklabels():
+    label.set_rotation(90)
+
 if IN_NOTEBOOK:
-    unique_counts = grouped_counts.groupby('primary_tissue')[
-        'ccle_name'].nunique().reset_index(name='unique_ccle_count')
-
-    # grouped_counts: columns = ['primary_tissue', 'ccle_name', 'count']
-    # unique_counts:  columns = ['primary_tissue', 'unique_ccle_count']
-
-    # 1) Pick a consistent tissue order
-    order = (grouped_counts.groupby('primary_tissue')['count']
-            .median().sort_values(ascending=False).index)
-
-    # limit to top-N tissues to keep the x-axis readable
-    TOP_N = 20
-    if TOP_N is not None:
-        keep = list(order[:TOP_N])
-        grouped_counts = grouped_counts[
-            grouped_counts['primary_tissue'].isin(keep)]
-        unique_counts  = unique_counts[
-            unique_counts['primary_tissue'].isin(keep)]
-        order = [t for t in order if t in keep]
-
-    # Ensure the bottom bar data follows the same order
-    unique_counts = unique_counts.set_index('primary_tissue').reindex(order).\
-        reset_index()
-
-    # 2) Make vertically stacked subplots with a shared x-axis
-    fig, (ax_top, ax_bot) = plt.subplots(
-        2, 1, figsize=(14, 9), sharex=True,
-        gridspec_kw={'height_ratios': [2, 1]}
-    )
-
-    # --- Top: distribution per tissue (box + dots) ---
-    sns.boxplot(
-        data=grouped_counts, 
-        x='primary_tissue', 
-        y='count', 
-        order=order, 
-        ax=ax_top)
-    sns.stripplot(data=grouped_counts, x='primary_tissue', y='count',
-                order=order, ax=ax_top, jitter=True, alpha=0.5)
-    ax_top.set_xlabel('')
-    ax_top.set_ylabel('# (molecule, cell line) combos')
-    ax_top.set_title('Distribution of combos per cell line within each tissue')
-
-    # --- Bottom: number of unique cell lines per tissue (bar) ---
-    sns.barplot(data=unique_counts, x='primary_tissue', y='unique_ccle_count',
-                order=order, ax=ax_bot)
-    ax_bot.set_xlabel('Primary tissue')
-    ax_bot.set_ylabel('# unique CCLE names')
-
-    # Rotate x labels only on the bottom axis
-    for label in ax_bot.get_xticklabels():
-        label.set_rotation(90)
 
     plt.tight_layout()
     plt.show()
+
 else:
-    print("Skipping plotting since not in a notebook environment.")
+
+    print("Not in a notebook environment. Skipping plot display")
+
+# save to output/figures
+out_dir = repo_root() / "output" / "figures"
+out_dir.mkdir(parents=True, exist_ok=True)
+out_path = out_dir / "depmap_prism_tissue_summary.png"
+fig.savefig(out_path, dpi=300, bbox_inches='tight')
+print(f"Saved figure to: {out_path}")
+
+plt.close(fig)
 
 
 # ## Export preprocessed data
