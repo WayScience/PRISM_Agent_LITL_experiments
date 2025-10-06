@@ -37,13 +37,14 @@ from tqdm import tqdm
 import pandas as pd
 import dspy
 import matplotlib.pyplot as plt
+from openai import OpenAI
 
 from dspy_litl_agentic_system.tasks.prism_lookup import PrismLookup
 from dspy_litl_agentic_system.tasks.task_dispatcher import PrismDispatchQueue
 from dspy_litl_agentic_system.agent.signatures import PredictIC50DrugCell
 from dspy_litl_agentic_system.agent.trace_unit import TraceUnit
 from dspy_litl_agentic_system.utils.jsonl_log import append_jsonl
-from nbutils.pathing import repo_root
+from nbutils.pathing import project_file, repo_root
 from nbutils.utils import IN_NOTEBOOK
 
 if IN_NOTEBOOK:
@@ -81,9 +82,7 @@ LM_CONFIG = {
 # In[3]:
 
 
-git_root = subprocess.check_output(
-    ["git", "rev-parse", "--show-toplevel"], text=True
-).strip()
+git_root = repo_root()
 
 all_data_path = Path(git_root) \
     / "data" / "processed" / "processed_depmap_prism_ic50.csv"
@@ -99,18 +98,18 @@ log_path.mkdir(parents=True, exist_ok=True)
 # In[4]:
 
 
-# --- Step 1: Locate repo root and config file ---
-git_root = subprocess.check_output(
-    ["git", "rev-parse", "--show-toplevel"], text=True
-).strip()
-config_path = Path(git_root) / "config.yml"
+# --- Step 1: Locate config file ---
+try:
+    config_path = project_file("config.yml")
+except NameError:
+    config_path = Path(git_root) / "config.yml"
 
 if not config_path.exists():
     raise FileNotFoundError(f"Config file not found at: {config_path}")
 
 # --- Step 2: Load config.yml ---
 with open(config_path, "r") as f:
-    config = yaml.safe_load(f)
+    config = yaml.safe_load(f) or {}
 
 # --- Step 3: Validate api section ---
 api_cfg = config.get("api")
@@ -121,19 +120,54 @@ if not api_cfg:
 required = {"openai": "OPENAI_API_KEY"}
 
 # --- Step 4: Collect resolved paths ---
-results = []
-errors = []  # collect problems for later
-for req, environ_var in required.items():
-    value = api_cfg.get(req, None)
-    if value is None:
-        results.append((req, None, "Missing in config"))
-        errors.append(f"Config '{req}' is missing")
+rows, errors = [], []
+for service, env_var in required.items():
+    svc_cfg = api_cfg.get(service)
+
+    if svc_cfg is None:
+        rows.append((service, env_var, None, "Missing in config"))
+        errors.append(f"Config for '{service}' is missing under 'api'")
         continue
-    key = value.get('key', None)
-    if key is None:
-        raise ValueError(f"Missing 'key' for '{req}' in config.yml")
+
+    # Expect a structure like: api: { openai: { key: "..."} }
+    key = svc_cfg.get("key")
+    if not isinstance(key, str) or not key.strip():
+        rows.append((service, env_var, None, "Missing 'key' or empty"))
+        errors.append(f"Missing or empty 'key' for '{service}' in config.yml")
+        continue
+
+    # Set environment variable
+    os.environ[env_var] = key
+    status_str = "" 
+    if os.getenv(env_var):
+        status_str += "Exported"
+        try:
+            # use list models to validate key
+            # avoids calling a model that may incur cost
+            client = OpenAI(api_key=key)
+            models = client.models.list()
+        except Exception as e:
+            status_str += f"& Error: {str(e)}"
+        status_str += " & Validated"
     else:
-        os.environ[environ_var] = key
+        status_str += " Failed to export"
+
+    rows.append((service, env_var, "********", status_str))
+
+# --- Step 5: Display summary nicely ---
+config_df = (
+    pd.DataFrame(rows, columns=["Service", "Env Var", "Key (masked)", "Status"])
+      .set_index("Service")
+)
+print(config_df)
+
+# --- Step 6: Fail if any errors were collected ---
+if errors:
+    raise ValueError(
+        "API config validation failed:\n" +
+        "\n".join(f"- {e}" for e in errors) +
+        "\nPlease refer to /config.yml.template for correct specification."
+    )
 
 
 # ### Initialize LooUp and Dispatcher class
@@ -231,7 +265,7 @@ for i in tqdm(
 # 
 # As anticipated, our agent, without any external tools and memory, does not display improved predictive performance over iterations.
 
-# In[8]:
+# In[ ]:
 
 
 fold_errs = []
