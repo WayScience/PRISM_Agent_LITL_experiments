@@ -90,7 +90,16 @@ prism_all_data = pd.read_csv(all_data_path)
 
 log_path = Path(git_root) \
     / "analysis" / "log" / "demo" / "toolless" / CCLE_NAME
-log_path.mkdir(parents=True, exist_ok=True) 
+log_path.mkdir(parents=True, exist_ok=True)
+
+representation = f"step={N};ccle={CCLE_NAME};shuffle={SHUFFLE_QUEUE};" \
+                 f"seed={SHUFFLE_SEED};"
+representation += ';'.join(f"{key}={val}" \
+                           for key, val in LM_CONFIG.items()).replace('/', '_')
+
+log_file = log_path / f"{representation}.jsonl"
+if log_file.exists():
+    log_file.unlink()
 
 
 # ### Validate Global Configurations
@@ -218,12 +227,6 @@ agent = dspy.Predict(
 
 _n = min(N, dispatcher.remaining)
 
-representation = f"step={_n};ccle={CCLE_NAME};shuffle={SHUFFLE_QUEUE};" \
-                 f"seed={SHUFFLE_SEED};"
-representation += ';'.join(f"{key}={val}" \
-                           for key, val in LM_CONFIG.items()).replace('/', '_')
-
-log_file = log_path / f"{representation}.jsonl"
 trace = OrderedDict()
 n_range = range(_n)
 
@@ -265,7 +268,7 @@ for i in tqdm(
 # 
 # As anticipated, our agent, without any external tools and memory, does not display improved predictive performance over iterations.
 
-# In[ ]:
+# In[8]:
 
 
 fold_errs = []
