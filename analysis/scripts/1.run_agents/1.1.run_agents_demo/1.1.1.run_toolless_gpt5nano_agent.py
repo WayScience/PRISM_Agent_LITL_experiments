@@ -33,7 +33,6 @@ from pathlib import Path
 import yaml
 import os
 
-from tqdm import tqdm
 import pandas as pd
 import dspy
 import matplotlib.pyplot as plt
@@ -49,8 +48,10 @@ from nbutils.utils import IN_NOTEBOOK
 
 if IN_NOTEBOOK:
     print("Running in IPython shell")
+    from tqdm.notebook import tqdm
 else:
     print("Running in standard Python shell")
+    from tqdm.auto import tqdm
 
 
 # ### Parameters
@@ -228,10 +229,9 @@ agent = dspy.Predict(
 _n = min(N, dispatcher.remaining)
 
 trace = OrderedDict()
-n_range = range(_n)
 
 for i in tqdm(
-    n_range, 
+    range(_n), 
     desc="Running Agentic Predictions over Queue of Drugs",
     total=_n
     ):
