@@ -4,7 +4,7 @@
 # # Tool-less Agent Demo
 # 
 # This script demonstrates a minimal agentic AI experiment using:
-# - GPT5-nano model
+# - `meta-llama/Llama-3.1-8B-Instruct`
 # - `HUCCT1_BILIARY_TRACT` cell line from the DepMap PRISM IC50 dataset
 # 
 # ### Overview
@@ -30,11 +30,9 @@
 from collections import OrderedDict
 from pathlib import Path
 import yaml
-import os
 
 import pandas as pd
 import dspy
-from openai import OpenAI
 
 from dspy_litl_agentic_system.tasks.prism_lookup import PrismLookup
 from dspy_litl_agentic_system.tasks.task_dispatcher import PrismDispatchQueue
@@ -68,14 +66,11 @@ UNIT = 'uM' # PRISM standard unit
 CCLE_NAME = "HUCCT1_BILIARY_TRACT" # an arbitrary cell line for demo
 SHUFFLE_QUEUE = True
 SHUFFLE_SEED = 42
+
 LM_CONFIG = {
-    "model": "openai/gpt-5-nano", # small model for demo
-    # Controls the randomness of the model's output (add variability to 
-    # next token sampling). Lower values make the output more
-    # deterministic, while higher values increase randomness.
-    # A value of 1.0 is used here 
-    # for the demo, balancing creativity and determinism.
-    "temperature": 1.0, 
+    "model": "openai/meta-llama/Llama-3.1-8B-Instruct",
+    "api_key": "",
+    "temperature": 1.0,
     "max_tokens": 20000,
     "seed": 42
 }
@@ -130,7 +125,7 @@ if not api_cfg:
     raise ValueError("Missing 'api' section in config.yml")
 
 # Required keys
-required = {"openai": "OPENAI_API_KEY"}
+required = {'modal': "llama31_8b"}
 
 # --- Step 4: Collect resolved paths ---
 rows, errors = [], []
@@ -142,34 +137,21 @@ for service, env_var in required.items():
         errors.append(f"Config for '{service}' is missing under 'api'")
         continue
 
-    # Expect a structure like: api: { openai: { key: "..."} }
-    key = svc_cfg.get("key")
-    if not isinstance(key, str) or not key.strip():
-        rows.append((service, env_var, None, "Missing 'key' or empty"))
-        errors.append(f"Missing or empty 'key' for '{service}' in config.yml")
+    # Expect a structure like: api: { modal: { llama31_8b: "https//:...modal.run"} }
+    endpoint = svc_cfg.get("llama31_8b")
+    if not isinstance(endpoint, str) or not endpoint.strip():
+        rows.append((service, env_var, None, "Missing 'llama31_8b' or empty"))
+        errors.append(f"Missing or empty 'llama31_8b' for '{service}' in config.yml")
         continue
 
-    # Set environment variable
-    os.environ[env_var] = key
-    status_str = "" 
-    if os.getenv(env_var):
-        status_str += "Exported"
-        try:
-            # use list models to validate key
-            # avoids calling a model that may incur cost
-            client = OpenAI(api_key=key)
-            models = client.models.list()
-        except Exception as e:
-            status_str += f"& Error: {str(e)}"
-        status_str += " & Validated"
-    else:
-        status_str += " Failed to export"
+    endpoint_masked = endpoint.replace(
+        endpoint.split('//')[1].split('--')[0], '********')
 
-    rows.append((service, env_var, "********", status_str))
+    rows.append((service, env_var, endpoint_masked, "Found"))
 
 # --- Step 5: Display summary nicely ---
 config_df = (
-    pd.DataFrame(rows, columns=["Service", "Env Var", "Key (masked)", "Status"])
+    pd.DataFrame(rows, columns=["Service", "Env Var", "Endpoint (masked)", "Status"])
       .set_index("Service")
 )
 print(config_df)
@@ -212,10 +194,16 @@ dispatcher.has_next()
 # In[6]:
 
 
-dspy.configure(
-    lm=dspy.LM(
-        **LM_CONFIG
-    ))
+lm = dspy.LM(
+    "openai/meta-llama/Llama-3.1-8B-Instruct",
+    api_base=f"{endpoint}/v1",
+    api_key="local",
+    model_type="chat",
+    max_tokens=20000,
+    temperature=1.0,
+    seed=42,
+)
+dspy.configure(lm=lm)
 agent = dspy.Predict(
     PredictIC50DrugCell,
     tools=[]

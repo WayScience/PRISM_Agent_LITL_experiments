@@ -6,3 +6,5 @@ data:
 api:
   openai:
     key: "YOUR_OPENAI_API_KEY"
+  modal:
+    llama31_8b: "https://your/modal/endpoint.modal.run"
