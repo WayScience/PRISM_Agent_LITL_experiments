@@ -1,7 +1,12 @@
 """
 rate_limiter.py
 
-File-based rate limiting, intended to be used by methods that involve API calls.
+File-based rate limiting.
+Tool methods that involve API calls should invoke `.acquire()` before
+    making the call to avoid hitting the API end rate limits. The file-based
+    nature of this rate limiter allows it to work across multiple
+    processes/threads, which is important for agentic experiments that
+    are parallelized.
 Adapted from https://github.com/FibrolytixBio/cf-compound-selection-demo
 Added some guardrails against bad init parameters and corrupted state files, 
 potential cross-platform compatibility issues.
