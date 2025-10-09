@@ -10,5 +10,9 @@
 - [x] Implement demo experiments
   - [x] Demo experiment with subset of PRISM data and GPT5-nano model
   - [x] Demo experiment with subset of PRISM data and Llama-3.1-8B model 
-- [ ] Expand tool library with academic use cases  
+- [ ] Expand tool library with academic use cases 
+  - [x] Tool rate limiting
+  - [ ] Tool call caching
+  - [ ] Chembl Query tools
+  - [ ] Pubchem Query tools
 - [ ] Iterative experiments on hypothetical PRISM-style LITL data  
