@@ -127,3 +127,25 @@ class TestCacheDecorator:
         result2 = func(5, y=20)  # Different y but same custom key
         
         assert result1 == result2 == 15  # Second call returns cached result
+
+    def test_expire_ttl(self, temp_cache_dir):
+        call_count = 0
+        
+        @tool_cache("test_tool", base_dir=temp_cache_dir, expire=0.01)
+        def func(x):
+            nonlocal call_count
+            call_count += 1
+            return x * 2
+        
+        result1 = func(5)
+        assert result1 == 10
+        assert call_count == 1
+        
+        # Wait for expiration
+        import time
+        time.sleep(0.02)
+        
+        # Cache should be expired, function should be called again
+        result2 = func(5)
+        assert result2 == 10
+        assert call_count == 2  # Called again after expiration
