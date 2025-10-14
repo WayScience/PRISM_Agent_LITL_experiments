@@ -54,31 +54,20 @@ def default_key_fn(
     version: str,
     tag: Optional[str],
 ) -> str:
-    """
-    Default key function: SHA256 of JSON-serialized payload.
-    Used to generate unique cache keys based on function identity and args.
-    Intended to be used with @tool_cache decorator and operate on tool methods.
-    """
+    """SHA256 of a normalized JSON payload."""
+    base = {
+        "v": version,
+        "func": f"{func.__module__}.{func.__qualname__}",
+        "args": args,
+        "kwargs": kwargs,
+        "tag": tag,
+    }
     try:
-        payload = {
-            "v": version,
-            "func": func.__module__ + "." + func.__qualname__,
-            "args": args,
-            "kwargs": kwargs,
-            "tag": tag,
-        }
-        text = json.dumps(payload, sort_keys=True, default=str)
+        text = json.dumps(base, sort_keys=True, default=str)
     except Exception:
-        text = json.dumps(
-            {
-                "v": version,
-                "func": func.__module__ + "." + func.__qualname__,
-                "args": [repr(a) for a in args],
-                "kwargs": {k: repr(v) for k, v in sorted(kwargs.items())},
-                "tag": tag,
-            },
-            sort_keys=True,
-        )
+        base["args"] = [repr(a) for a in args]
+        base["kwargs"] = {k: repr(v) for k, v in sorted(kwargs.items())}
+        text = json.dumps(base, sort_keys=True)
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
