@@ -2,26 +2,20 @@
 cache_config.py
 
 Cache configuration and global state management. 
-See tool_cache.py for the main caching decorator and detailed motivation of 
-    design. 
 We intend to use persistent caching on all API/database tools
     related to compound queries, and will cache based on the query method
     arguments. To avoid caching redundant data that are just subsets of larger
     queries, we will use a fixed fetch limit for all API calls that return
     multiple results (e.g. 50). This will ensure that the same query with a
     different fetch limit will be cached separately.
-This module provides programmatic and environment variable based configuration
-    of global cache settings that apply to all tools decorated with @tool_cache.
-Note that this only takes effect when configured before actually using tools 
-    decorated with @tool_cache.
 
-Exposes to the user:
+User:
 - `set_default_cache_root` to programmatically set the cache root
 - `set_cache_defaults` to programmatically set cache limit and expire
 - `set_fetch_limit` to programmatically set the fixed API fetch limit
 This enables the same set of cache to be re-usable across multiple runs
 
-Provides to the decorator:
+decorator:
 - `resolve_cache_root` to determine the effective cache root directory
 - `resolve_global_size_limit` to determine the effective size limit
 - `resolve_global_expire` to determine the effective expire (TTL, seconds)
@@ -56,10 +50,7 @@ def set_default_cache_root(path: str | Path):
 
 def resolve_cache_root() -> Path:
     """
-    Decide the effective cache root directory:
-      1) programmatic global default if set
-      2) environment variable AGENTIC_CACHE_DIR
-      3) fallback to ~/.cache/agentic_tools
+    Decide the effective cache root directory.
     Intended to be used internally by the decorator at runtime.
     """
     if _AGENTIC_CACHE_ROOT is not None:
@@ -93,11 +84,7 @@ def set_cache_defaults(
 
 def resolve_global_size_limit(default_from_decorator: Optional[int]) -> int:
     """
-    Decide the effective size limit for diskcache:
-      1) decorator argument if provided (not None)
-      2) programmatic global default if set
-      3) environment variable AGENTIC_CACHE_SIZE_LIMIT_BYTES
-      4) fallback to sys.maxsize
+    Decide the effective size limit for diskcache.      
     Intended to be used internally by the decorator at runtime.
     """
     if default_from_decorator is not None:
@@ -116,11 +103,7 @@ def resolve_global_size_limit(default_from_decorator: Optional[int]) -> int:
 def resolve_global_expire(
         default_from_decorator: Optional[float]) -> Optional[float]:
     """
-    Decide the effective expire (TTL, seconds):
-      1) decorator argument if provided (not None)
-      2) programmatic global default if set
-      3) environment variable AGENTIC_CACHE_EXPIRE_SECS
-      4) fallback to None (never expire)
+    Decide the effective expire (TTL, seconds).
     Intended to be used internally by the decorator at runtime.
     """
     if default_from_decorator is not None:
