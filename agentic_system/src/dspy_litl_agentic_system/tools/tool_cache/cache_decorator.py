@@ -140,7 +140,7 @@ def tool_cache(
             except Exception:
                 pass
 
-            # Miss behavior
+            # Miss behavior - error out if offline_only
             oo = call_offline_only \
                 if call_offline_only is not None else offline_only
             if oo:
@@ -149,7 +149,7 @@ def tool_cache(
                     f"(cache={cache_dir})."
                 )
 
-            # Compute + write
+            # Compute + cache if miss but not offline_only
             result = func(*args, **kwargs)
             effective_expire = resolve_global_expire(expire)
             ttl = effective_expire if call_expire is None else call_expire
@@ -157,6 +157,7 @@ def tool_cache(
             try:
                 cache.set(key, result, expire=ttl)
             except Exception:
+                # best effort serialization
                 try:
                     cache.set(
                         key, 
@@ -164,6 +165,7 @@ def tool_cache(
                         expire=ttl
                     )
                 except Exception:
+                    # fallback to str
                     cache.set(key, str(result), expire=ttl)
             return result
 
