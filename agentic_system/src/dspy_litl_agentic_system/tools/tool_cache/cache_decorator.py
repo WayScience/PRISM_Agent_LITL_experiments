@@ -54,7 +54,10 @@ def default_key_fn(
     version: str,
     tag: Optional[str],
 ) -> str:
-    """SHA256 of a normalized JSON payload."""
+    """
+    SHA256 of a normalized JSON payload. 
+    Allows unique identification of tool method calls for caching. 
+    """
     base = {
         "v": version,
         "func": f"{func.__module__}.{func.__qualname__}",
