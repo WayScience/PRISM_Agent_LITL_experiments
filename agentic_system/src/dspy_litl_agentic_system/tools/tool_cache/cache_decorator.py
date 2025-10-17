@@ -81,6 +81,7 @@ def tool_cache(
     size_limit_bytes: Optional[int] = None,
     expire: Optional[float] = None,
     offline_only: bool = False,
+    force_refresh: bool = False,
     cache_version: str = "1",
     include_func_fingerprint: bool = True,
     tag: Optional[str] = None,
@@ -101,6 +102,7 @@ def tool_cache(
     - _cache_dir: override cache directory for this call
     - _cache_expire_override: override TTL for this write
     - _offline_only: force offline behavior for this call (bool)
+    - _force_refresh: bypass cache and force execution (bool)
     """
 
     def _resolve_effective_dir(call_override: Optional[str | Path]) -> Path:
@@ -122,6 +124,7 @@ def tool_cache(
             call_cache_dir = kwargs.pop("_cache_dir", None)
             call_offline_only = kwargs.pop("_offline_only", None)
             call_expire = kwargs.pop("_cache_expire_override", None)
+            call_force_refresh = kwargs.pop("_force_refresh", False)
 
             cache_dir = _resolve_effective_dir(call_cache_dir)
             cache = get_cache(cache_dir, size_limit_bytes)
@@ -133,12 +136,16 @@ def tool_cache(
             )
             key = kf(func, args, kwargs)
 
-            # Cache hit
-            try:
-                if key in cache:
-                    return cache[key]
-            except Exception:
-                pass
+            # Determine if we should force refresh
+            do_force_refresh = call_force_refresh
+
+            # Cache hit (skip if force_refresh is True)
+            if not do_force_refresh:
+                try:
+                    if key in cache:
+                        return cache[key]
+                except Exception:
+                    pass
 
             # Miss behavior - error out if offline_only
             oo = call_offline_only \
