@@ -21,7 +21,7 @@ Adapted from https://github.com/FibrolytixBio/cf-compound-selection-demo.
 
 from typing import Any, Dict, Optional, Tuple, List
 
-from .temp import dummy_cache_decorator as tool_cache  # temporary, will be replaced
+from ..tool_cache.cache_decorator import tool_cache
 from .temp import dummy_fetch_limit as get_fetch_limit  # temporary, will be replaced
 from .chembl_client import ChEMBLClient
 
