@@ -12,6 +12,10 @@ import httpx
 from .temp import DummyRateLimiter as RateLimiter # will be replaced with real RL
 
 # ChEMBL API client configuration
+# Note that this is the 2.x ChEMBL API base URL
+# https://github.com/chembl/chembl_webservices_2
+# which is still active as of 2025. 
+# In the future this may cease to be supported.
 CHEMBL_BASE_URL = "https://www.ebi.ac.uk/chembl/api/data"
 TIMEOUT = 30.0
 
