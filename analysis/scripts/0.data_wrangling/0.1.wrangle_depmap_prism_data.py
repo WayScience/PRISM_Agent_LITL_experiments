@@ -23,6 +23,9 @@
 import pathlib
 import yaml
 import json
+import os
+import argparse
+import tempfile
 
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -37,10 +40,35 @@ if IN_NOTEBOOK:
 else:
     print("Running in standard Python shell")
 
+DEFAULT_PLOT_OUTPUT_DIR = repo_root() / "output" / "figures"
+
+
+# In[2]:
+
+
+def _parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(description="Notebook pipeline (nbconverted).")
+    g = p.add_mutually_exclusive_group()
+    g.add_argument("--out-dir", type=pathlib.Path, help="Directory to write outputs.")
+    g.add_argument("--temp-out", action="store_true",
+                   help="Write outputs to a temporary directory.")
+    p.add_argument("--overwrite", action="store_true",
+                   help="Allow overwriting existing outputs.")
+    return p.parse_args()
+
+def _resolve_out_dir(args: argparse.Namespace) -> pathlib.Path:
+    if args.out_dir:
+        return args.out_dir
+    if args.temp_out:
+        base = pathlib.Path(os.getenv("TEST_ARTIFACTS_DIR", ".tmp/test_artifacts")).resolve()
+        base.mkdir(parents=True, exist_ok=True)
+        return pathlib.Path(tempfile.mkdtemp(prefix="nbscript_", dir=str(base)))
+    return DEFAULT_PLOT_OUTPUT_DIR
+
 
 # ### Config Validation
 
-# In[2]:
+# In[3]:
 
 
 # --- Step 1: Locate config file ---
@@ -109,7 +137,7 @@ if errors:
 
 # ### Load depmap PRISM cell line and drug dose response 
 
-# In[3]:
+# In[4]:
 
 
 cell_line_info_df = pd.read_csv(
@@ -117,7 +145,7 @@ cell_line_info_df = pd.read_csv(
 print(cell_line_info_df.head())
 
 
-# In[4]:
+# In[5]:
 
 
 dose_response_df = pd.read_csv(config_df.loc['dose_response', 'Resolved Path'])
@@ -143,7 +171,7 @@ print(dose_response_df.head())
 # Finally, the deduplicated screens are combined, giving **priority to `MTS010`**: if the same cell line–drug pair exists in both screens, the `MTS010` entry is retained.
 # 
 
-# In[5]:
+# In[6]:
 
 
 DEDUP_SEED = 42
@@ -210,7 +238,7 @@ print(combined.head())
 
 # ### Confirm no duplicate cell-drug combinations
 
-# In[6]:
+# In[7]:
 
 
 duplicates = combined.duplicated(subset=['ccle_name', 'name'], keep=False)
@@ -225,11 +253,25 @@ if not duplicate_counts.empty:
     )
 
 
+# ## Export preprocessed data
+
+# In[8]:
+
+
+# output to the /data/processed directory
+# only works as intended with vscode setting 
+# "jupyter.notebookFileRoot": "${workspaceFolder}"
+output_path = repo_root() \
+    / "data" / "processed" / "processed_depmap_prism_ic50.csv"
+output_path.parent.mkdir(parents=True, exist_ok=True)
+combined.to_csv(output_path, index=False)
+
+
 # ## Tabulate/visualize data
 
 # ### primary tissue - cell line count
 
-# In[7]:
+# In[9]:
 
 
 grouped_counts = combined.groupby(['primary_tissue', 'ccle_name']).size().\
@@ -239,7 +281,7 @@ print(grouped_counts.head(20))
 
 # ### number of cell-drug combiantions in dataset, grouped by primary tissue
 
-# In[8]:
+# In[ ]:
 
 
 unique_counts = grouped_counts.groupby('primary_tissue')[
@@ -287,7 +329,7 @@ ax_top.set_title('Distribution of combos per cell line within each tissue')
 
 # --- Bottom: number of unique cell lines per tissue (bar) ---
 sns.barplot(data=unique_counts, x='primary_tissue', y='unique_ccle_count',
-            order=order, ax=ax_bot)
+            order=order, ax=ax_bot, seed=42)
 ax_bot.set_xlabel('Primary tissue')
 ax_bot.set_ylabel('# unique CCLE names')
 
@@ -304,26 +346,18 @@ else:
 
     print("Not in a notebook environment. Skipping plot display")
 
-# save to output/figures
-out_dir = repo_root() / "output" / "figures"
-out_dir.mkdir(parents=True, exist_ok=True)
-out_path = out_dir / "depmap_prism_tissue_summary.png"
-fig.savefig(out_path, dpi=300, bbox_inches='tight')
-print(f"Saved figure to: {out_path}")
+def _save_fig(fig: plt.Figure, out_dir: pathlib.Path) -> None:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / "depmap_prism_tissue_summary.png"
+    fig.savefig(out_path, dpi=300, bbox_inches='tight')
+    print(f"Saved figure to: {out_path}")
+
+# only save to default when in notebook mode or run as script with args
+if IN_NOTEBOOK:
+    _save_fig(fig, DEFAULT_PLOT_OUTPUT_DIR)
+elif __name__ == "__main__":
+    args = _parse_args()
+    out_dir = _resolve_out_dir(args)
+    _save_fig(fig, out_dir)
 
 plt.close(fig)
-
-
-# ## Export preprocessed data
-
-# In[9]:
-
-
-# output to the /data/processed directory
-# only works as intended with vscode setting 
-# "jupyter.notebookFileRoot": "${workspaceFolder}"
-output_path = repo_root() \
-    / "data" / "processed" / "processed_depmap_prism_ic50.csv"
-output_path.parent.mkdir(parents=True, exist_ok=True)
-combined.to_csv(output_path, index=False)
-
