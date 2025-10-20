@@ -10,6 +10,12 @@ The tools that will be made accessible to the agentic systems are thin,
     a separate limit parameter to allow the agents to request any amount of 
     results as it sees fit while every query still has a single source of truth
     cache based on the global fetch limit.
+All ChEMBL backend methods make a get request to the 2.x ChEMBL API 
+    (see chembl_client.py for details) with specific endpoints as documented
+    in https://www.ebi.ac.uk/chembl/api/data/docs. E.g. for searching compounds,
+    the request is made as /chembl/api/data/molecule/search?q={query}. Given
+    that the ChEMBL API isn't strictly versioned but is quite stable, these
+    methods should hopefully work for the foreseeable future.
 Adapted from https://github.com/FibrolytixBio/cf-compound-selection-demo.
 """
 
@@ -65,7 +71,11 @@ def _shared_client_get_process(
 
 @tool_cache(cache_name)
 def _search_chembl_id_global(query: str) -> Dict[str, Any]:
-    """Search ChEMBL for a compound by query with global fetch limit."""
+    """
+    Search ChEMBL for a compound by query with global fetch limit.
+    Query can be any string (canonical name, synonym, smiles, etc).
+    Makes a request equivalent to /molecule/search?q={query}
+    """
     payload, error = _shared_client_get_process(
         endpoint="/molecule/search.json",
         fields="molecules",
@@ -88,9 +98,12 @@ def _get_compound_properties_global(chembl_id: str) -> Dict[str, Any]:
     Get compound properties from ChEMBL by ChEMBL ID with global fetch limit.
     Does not use the shared client get process due to needing to interact with
         a different response structure.
+    GET from /chembl/api/data/molecule/{chembl_id}
+    
+    :param chembl_id: ChEMBL ID of the compound to retrieve properties for.
     """
     result = chembl_client.get("/molecule.json", params={
-        "molecule_chembl_id": "CHEMBL25",
+        "molecule_chembl_id": chembl_id,
         "limit": get_fetch_limit()
     })
     if "error" in result:
@@ -121,7 +134,13 @@ def _get_compound_activities_global(
     chembl_id: str,
     activity_type: Optional[str] = None
 ) -> Dict[str, Any]:    
-    """Get compound activities from ChEMBL by ChEMBL ID with global fetch limit."""
+    """
+    Get compound activities from ChEMBL by ChEMBL ID with global fetch limit.
+    GET from /chembl/api/data/activity.json
+
+    :param chembl_id: ChEMBL ID of the compound to retrieve activities for.
+    :param activity_type: Optional activity type filter (e.g., "IC50").
+    """
     payload, error = _shared_client_get_process(
         endpoint="/activity.json",
         fields="activities",
@@ -139,7 +158,12 @@ def _get_compound_activities_global(
     
 @tool_cache(cache_name)
 def _get_drug_info_global(chembl_id: str) -> Dict[str, Any]:
-    """Get drug information from ChEMBL by ChEMBL ID with global fetch limit."""
+    """
+    Get drug information from ChEMBL by ChEMBL ID with global fetch limit.
+    GET from /chembl/api/data/drug.json
+
+    :param chembl_id: ChEMBL ID of the drug to retrieve information for.
+    """
     payload, error = _shared_client_get_process(
         endpoint="/drug.json",
         fields="drugs",
@@ -154,7 +178,11 @@ def _get_drug_info_global(chembl_id: str) -> Dict[str, Any]:
 @tool_cache(cache_name)
 def _get_drug_moa_global(chembl_id: str) -> Dict[str, Any]:
     """Get drug mechanism of action from ChEMBL by ChEMBL ID
-        with global fetch limit."""
+        with global fetch limit.
+    GET from /chembl/api/data/mechanism.json
+
+    :param chembl_id: ChEMBL ID of the drug to retrieve mechanism of action for.
+    """
     
     payload, error = _shared_client_get_process(
         endpoint="/mechanism.json",
@@ -169,7 +197,12 @@ def _get_drug_moa_global(chembl_id: str) -> Dict[str, Any]:
 
 @tool_cache(cache_name)
 def _get_drug_indications_global(chembl_id: str) -> Dict[str, Any]:
-    """Get drug indications from ChEMBL by ChEMBL ID with global fetch limit."""
+    """
+    Get drug indications from ChEMBL by ChEMBL ID with global fetch limit.
+    GET from /chembl/api/data/drug_indication.json
+
+    :param chembl_id: ChEMBL ID of the drug to retrieve indications for.
+    """
     payload, error = _shared_client_get_process(
         endpoint="/drug_indication.json",
         fields="drug_indications",
@@ -183,7 +216,11 @@ def _get_drug_indications_global(chembl_id: str) -> Dict[str, Any]:
 
 @tool_cache(cache_name)
 def _search_target_id_global(query: str) -> Dict[str, Any]:
-    """Search ChEMBL for a target by query with global fetch limit."""
+    """
+    Search ChEMBL for a target by query with global fetch limit.
+    Query can be any string (name, synonym, etc).
+    Requests made to /target/search?q={query}
+    """
     payload, error = _shared_client_get_process(
         endpoint="/target/search.json",
         fields="targets",
@@ -199,7 +236,12 @@ def _search_target_id_global(query: str) -> Dict[str, Any]:
 def _get_target_activities_summary_global(
     chembl_id: str, activity_type: Optional[str] = "IC50") -> Dict[str, Any]:
     """Get target activities summary from ChEMBL by target ID
-        with global fetch limit."""
+        with global fetch limit.
+    GET from /chembl/api/data/activity.json
+
+    :param chembl_id: ChEMBL ID of the target to retrieve activities for.
+    :param activity_type: Optional activity type filter (e.g., "IC50").
+    """
     payload, error = _shared_client_get_process(
         endpoint="/activity.json",
         fields="activities",
