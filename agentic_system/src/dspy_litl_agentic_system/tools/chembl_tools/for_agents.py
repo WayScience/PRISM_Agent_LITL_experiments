@@ -26,6 +26,15 @@ from .chembl_backend import (
 
 
 def search_chembl_id(query: str, limit: int = 5) -> str:
+    """
+    Search for ChEMBL IDs matching a query string that is a name or synonym.
+
+    Args:
+        query (str): The search query string.
+        limit (int): Maximum number of results to return.
+    Returns:
+        str: A formatted string with search results or an error message.
+    """
     result = _search_chembl_id_global(query)
     if result["error"]:
         return result["error"]
@@ -37,6 +46,15 @@ def search_chembl_id(query: str, limit: int = 5) -> str:
 
 
 def get_compound_properties(chembl_id: str) -> str:
+    """
+    Using ChEMBL ID, fetch key calculated properties and return
+    a natural language summary with context.
+
+    Args:
+        chembl_id (str): The ChEMBL ID of the compound.
+    Returns:
+        str: A natural language summary of the compound's properties or an error message.
+    """
     result = _get_compound_properties_global(chembl_id)
     if result["error"]:
         return result["error"]
@@ -119,7 +137,18 @@ def get_compound_activities(
     chembl_id: str, 
     activity_type: str | None = None,
     limit: int = 5
-) -> str:    
+) -> str:
+    """
+    Using ChEMBL ID, fetch bioactivity data and return
+    a natural language summary with context.
+    
+    Args:
+        chembl_id (str): The ChEMBL ID of the compound.
+        activity_type (str | None): Optional filter for activity type (e.g., "IC50").
+        max_results (int): Maximum number of targets to summarize.
+    Returns:
+        str: A natural language summary of the compound's bioactivities or an error message.
+    """
     result = _get_compound_activities_global(chembl_id, activity_type)
     if result["error"]:
         return result["error"]
@@ -190,6 +219,16 @@ def get_compound_activities(
 
 
 def get_drug_approval_status(chembl_id: str) -> str:
+    """
+    Using ChEMBL ID, check if the drug is approved and return
+    a natural language summary with context.
+
+    Args:
+        chembl_id (str): The ChEMBL ID of the drug.
+    Returns:
+        str: A natural language summary of the drug's 
+            approval status or an error message.
+    """
     result = _get_drug_info_global(chembl_id)
     if result["error"]:
         return result["error"]
@@ -205,6 +244,17 @@ def get_drug_approval_status(chembl_id: str) -> str:
     
 
 def get_drug_moa(chembl_id: str, limit: int = 5) -> str:
+    """
+    Using ChEMBL ID, fetch mechanism of action data and return
+    a natural language summary with context.
+    
+    Args:
+        chembl_id (str): The ChEMBL ID of the drug.
+        limit (int): Maximum number of mechanisms to include in the summary.
+    Returns:
+        str: A natural language summary of the drug's mechanisms of 
+            action or an error message.
+    """
     result = _get_drug_moa_global(chembl_id)
     if result["error"]:
         return result["error"]
@@ -230,6 +280,17 @@ def get_drug_moa(chembl_id: str, limit: int = 5) -> str:
 
 
 def get_drug_indications(chembl_id: str, limit: int = 5) -> str:
+    """
+    Using ChEMBL ID, fetch drug indication data and return
+    a natural language summary with context.
+    
+    Args:
+        chembl_id (str): The ChEMBL ID of the drug.
+        limit (int): Maximum number of indications to include in the summary.
+    Returns:
+        str: A natural language summary of the drug's 
+            indications or an error message.
+    """
     result = _get_drug_indications_global(chembl_id)
     if result["error"]:
         return result["error"]
@@ -254,6 +315,16 @@ def get_drug_indications(chembl_id: str, limit: int = 5) -> str:
 
 
 def search_target_id(query: str, limit: int = 5) -> str:
+    """
+    Search for ChEMBL target IDs matching a query string that is a name 
+        or synonym.
+
+    Args:
+        query (str): The search query string.
+        limit (int): Maximum number of results to return.
+    Returns:
+        str: A formatted string with search results or an error message.
+    """
     result = _search_target_id_global(query)
     if result["error"]:
         return result["error"]    
@@ -283,6 +354,18 @@ def get_target_activities_summary(
     activity_type: str | None = None,
     limit: int = 5
 ) -> str:
+    """
+    Using ChEMBL target ID, fetch bioactivity data and return
+    a natural language summary with context.
+    Args:
+        target_chembl_id (str): The ChEMBL ID of the target.
+        activity_type (str | None): Optional filter for activity type 
+            (e.g., "IC50").
+        max_compounds (int): Maximum number of compounds to summarize.
+    Returns:
+        str: A natural language summary of the target's 
+            bioactivities or an error message.
+    """
     result = _get_target_activities_summary_global(target_chembl_id)
     if result["error"]:
         return result["error"]
