@@ -5,11 +5,12 @@ HTTP client for ChEMBL API incorporating a rate limiter and gentle retry.
 Adapted from https://github.com/FibrolytixBio/cf-compound-selection-demo.
 """
 
-from typing import Any, Dict, Optional
-import time
+from typing import Any, Dict
 import httpx
 
 from .temp import DummyRateLimiter as RateLimiter # will be replaced with real RL
+from ..client import Client
+
 
 # ChEMBL API client configuration
 # Note that this is the 2.x ChEMBL API base URL
@@ -20,7 +21,7 @@ CHEMBL_BASE_URL = "https://www.ebi.ac.uk/chembl/api/data"
 TIMEOUT = 30.0
 
 
-class ChEMBLClient:
+class ChEMBLClient(Client):
     """HTTP client for ChEMBL API."""
 
     def __init__(
@@ -30,6 +31,8 @@ class ChEMBLClient:
         time_window: float = 1.0,    # second(s)
         rl_name: str = "chembl"      # unique name for the RL state file
     ):
+        super().__init__()
+
         self.client = httpx.Client(
             base_url=CHEMBL_BASE_URL,
             timeout=TIMEOUT,
@@ -40,18 +43,6 @@ class ChEMBLClient:
         )
         
         self.rate_limiter = RateLimiter()
-
-    def _respect_retry_after(self, response: httpx.Response) -> None:
-        """Sleep according to Retry-After header (seconds), if present."""
-        ra: Optional[str] = response.headers.get("Retry-After")
-        if ra:
-            try:
-                delay = float(ra)
-                if delay > 0:
-                    time.sleep(delay)
-            except ValueError:
-                # If non-numeric (e.g., HTTP-date), just do a small pause
-                time.sleep(1.0)
 
     def get(
         self,
