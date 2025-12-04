@@ -52,3 +52,8 @@ def make_request_process(args):
     limiter.acquire_sync()
     duration = time.monotonic() - start
     return (i, duration)
+
+@pytest.fixture
+def temp_cache_dir(tmp_path):
+    """Provides a temporary cache directory."""
+    return tmp_path / "test_cache"

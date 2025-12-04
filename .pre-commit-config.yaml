@@ -4,8 +4,26 @@ repos:
     hooks:
     -   id: end-of-file-fixer
 
--   repo: https://github.com/charliermarsh/ruff-pre-commit
-    rev: v0.0.287
+-   repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.14.0
     hooks:
-    -   id: ruff
+      - id: ruff
         args: ["--line-length=100"]
+        exclude: |
+            (?x)^(
+                .*\.ipynb$|
+                .*scripts\.py$
+            )
+      # linter.
+      - id: ruff-check
+        types_or: [ python, pyi ]
+        args: [ --fix ]
+
+-   repo: local
+    hooks:
+    -   id: pytest
+        name: pytest
+        entry: pytest
+        language: system
+        pass_filenames: false
+        types_or: [python]
