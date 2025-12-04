@@ -10,21 +10,85 @@ Tool methods that involve API calls should invoke `.acquire()` before
 Adapted from https://github.com/FibrolytixBio/cf-compound-selection-demo
 Added some guardrails against bad init parameters and corrupted state files, 
 potential cross-platform compatibility issues.
+Uses `fcntl.flock` on POSIX systems and `msvcrt.locking` on Windows at best
+effort. Please note that this package is developed and tested exclusively on
+POSIX systems; Windows support is not guaranteed.
 
 Classes:
 - FileBasedRateLimiter: enables cross-process/thread rate limiting 
     using file system locks
 """
 
+import os
 import json
 import time
 import asyncio
-import fcntl
 import tempfile
 import logging
 from pathlib import Path
+from typing import IO, Union
 
 logger = logging.getLogger(__name__)
+
+FilePath = Union[str, Path]
+_WINDOWS_LOCK_LENGTH = 1
+
+
+# --- Platform-specific imports ------------------------------------------------
+
+if os.name == "nt":
+    import msvcrt  # type: ignore[import]
+    fcntl = None
+elif os.name == "posix":
+    import fcntl  # type: ignore[import]
+    msvcrt = None
+else:
+    msvcrt = None
+    fcntl = None
+    raise RuntimeError(
+        "FileBasedRateLimiter only supports POSIX or Windows "
+        f"(os.name 'posix'/'nt'), got os.name='{os.name}'"
+    )
+
+# --- Locking helpers ----------------------------------------------------------
+
+
+def _lock_file(f: IO[bytes]) -> None:
+    """Cross-platform *exclusive* blocking file lock."""
+    if fcntl is not None:
+        fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+        return
+
+    if msvcrt is not None:
+        # Lock 1 byte from offset 0 to represent a lock on the whole file.
+        pos = f.tell()
+        try:
+            f.seek(0)
+            msvcrt.locking(f.fileno(), msvcrt.LK_LOCK, _WINDOWS_LOCK_LENGTH)
+        finally:
+            f.seek(pos)
+        return
+
+    # Should be unreachable with the RuntimeError above.
+    logger.debug("File locking unavailable; proceeding without explicit lock")
+
+
+def _unlock_file(f: IO[bytes]) -> None:
+    """Release cross-platform file lock."""
+    if fcntl is not None:
+        fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+        return
+
+    if msvcrt is not None:
+        pos = f.tell()
+        try:
+            f.seek(0)
+            msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, _WINDOWS_LOCK_LENGTH)
+        finally:
+            f.seek(pos)
+        return
+
+    logger.debug("File locking unavailable; nothing to unlock")
 
 
 class FileBasedRateLimiter:
@@ -99,7 +163,7 @@ class FileBasedRateLimiter:
         
         try:
             with open(self.state_file, "r+") as f:
-                fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+                _lock_file(f)
                 try:
                     data = self._read_and_validate_state(f)
                     now = time.monotonic()
@@ -119,7 +183,7 @@ class FileBasedRateLimiter:
                     data["requests"].append(now)
                     self._write_state(f, data)
                 finally:
-                    fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+                    _unlock_file(f)
         except (OSError, IOError) as e:
             logger.warning(
                 f"Failed to access state file {self.state_file}: {e}. "
