@@ -11,7 +11,7 @@
   - [x] Demo experiment with subset of PRISM data and GPT5-nano model
   - [x] Demo experiment with subset of PRISM data and Llama-3.1-8B model 
 - [ ] Expand tool library with academic use cases  
-  - [ ] Tool rate limiting
+  - [x] Tool rate limiting
   - [x] Tool call caching
   - [ ] Chembl Query tools
   - [ ] Pubchem Query tools

@@ -31,6 +31,8 @@ dependencies = [
 dev = [
   "pytest>=8",
   "pytest-cov",
+  "pytest-asyncio",
+  "pytest-timeout",
   "ruff",
   "mypy",
   "ipykernel",
@@ -53,7 +55,9 @@ pythonpath = ["agentic_system/src"]
 markers = [
     "slow: long-running tests (not run by default)",
     "gpu: requires a CUDA GPU",
-    "integration: touches filesystem / notebooks / mlflow, etc."
+    "integration: touches filesystem / notebooks / mlflow, etc.",
+    "timeout: test timeout in seconds",
+    "asyncio: async test using asyncio",
 ]
 filterwarnings = [
     "ignore::DeprecationWarning"
