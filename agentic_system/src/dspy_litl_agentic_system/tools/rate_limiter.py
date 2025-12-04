@@ -97,14 +97,17 @@ class FileBasedRateLimiter:
     across multiple processes and threads.
 
     How it works:
-    1. Request timestamps are stored in a JSON file with file locking for
-        thread safety
-    2. Before each request, old timestamps outside the time window are removed
-    3. If the request count exceeds the limit, the caller sleeps until the
+    1. Request timestamps are stored as monotonic time values in a JSON file
+        with file locking for thread safety
+    2. Wall-clock time is recorded to detect reboots
+    3. Before each request, old timestamps outside the time window are removed
+    4. If the request count exceeds the limit, the caller sleeps until the
         oldest request falls outside the time window
-    4. New request timestamps are appended and the state is persisted
-    5. If the state file is corrupted, it's automatically cleaned up and
+    5. New request timestamps are appended and the state is persisted
+    6. If the state file is corrupted, it's automatically cleaned up and
         the rate limiter assumes full capacity
+    7. Reboots are detected by comparing wall-clock time; if a reboot occurred,
+        the request queue is cleared automatically
     """
 
     def __init__(
@@ -132,6 +135,8 @@ class FileBasedRateLimiter:
         self.time_window = time_window
         temp_dir = Path(tempfile.gettempdir())
         self.state_file = temp_dir / f"{name}_rate_limiter.json"
+        # Store current wall-clock time to detect reboots
+        self._init_wall_time = time.time()
 
     async def acquire(self):
         """
@@ -149,11 +154,14 @@ class FileBasedRateLimiter:
         """
         Acquire the rate limiter synchronously.
         This method uses file locking to ensure that only one process/thread
-        can modify the state file at a time.
+        can modify the state file at a time. Uses monotonic time for rate
+        limiting and wall-clock time for reboot detection.
         """
         try:
             if not self.state_file.exists():
-                self.state_file.write_text(json.dumps({"requests": []}))
+                self.state_file.write_text(
+                    json.dumps({"requests": [], "boot_wall_time": time.time()})
+                )
         except (OSError, IOError) as e:
             logger.warning(
                 f"Failed to create state file {self.state_file}: {e}. "
@@ -166,21 +174,41 @@ class FileBasedRateLimiter:
                 _lock_file(f)
                 try:
                     data = self._read_and_validate_state(f)
-                    now = time.monotonic()
+                    now_monotonic = time.monotonic()
+                    now_wall = time.time()
+                    
+                    # Detect reboots: if wall-clock time went backward significantly,
+                    # a reboot occurred. Clear the request queue.
+                    boot_wall = data.get("boot_wall_time", now_wall)
+                    if now_wall < boot_wall - 60:  # 60s threshold for clock adjustments
+                        logger.info(
+                            f"Reboot detected (wall time went back from {boot_wall} "
+                            f"to {now_wall}). Clearing request queue."
+                        )
+                        data["requests"] = []
+                        data["boot_wall_time"] = now_wall
+                    elif abs(now_wall - boot_wall) > 3600 and data["requests"]:
+                        # If more than 1 hour has passed, update boot time
+                        # This helps with long-running processes
+                        data["boot_wall_time"] = now_wall
+                    
+                    # Filter out old requests using monotonic time
                     data["requests"] = [
-                        t for t in data["requests"] if now - t < self.time_window
+                        t for t in data["requests"] if now_monotonic - t < self.time_window
                     ]
+                    
                     if len(data["requests"]) >= self.max_requests:
                         oldest = data["requests"][0]
-                        wait = self.time_window - (now - oldest)
+                        wait = self.time_window - (now_monotonic - oldest)
                         if wait > 0:
                             time.sleep(wait)
-                            now = time.monotonic()
+                            now_monotonic = time.monotonic()
                             data["requests"] = [
                                 t for t in data["requests"]\
-                                    if now - t < self.time_window
+                                    if now_monotonic - t < self.time_window
                             ]
-                    data["requests"].append(now)
+                    
+                    data["requests"].append(now_monotonic)
                     self._write_state(f, data)
                 finally:
                     _unlock_file(f)
