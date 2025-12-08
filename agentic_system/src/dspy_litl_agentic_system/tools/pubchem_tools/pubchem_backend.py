@@ -1,7 +1,20 @@
 """
 pubchem_backend.py
 
-
+Backend, cached PubChem API access methods to cache queries with results
+    up to a global fetch limit.
+A `_shared_get` method is implemented because the get request
+    process and error handling is largely the same across all methods.
+The tools that will be made accessible to the agentic systems are thin, 
+    un-cached wrappers around these cached backend methods to have a
+    a separate limit parameter to allow the agents to request any amount of 
+    results as it sees fit while every query still has a single source of truth
+    cache based on the global fetch limit.
+All PubChem backend methods make a get request to the PubChem PUG REST API
+    (see pubchem_client.py for details) with specific endpoints as documented
+    in https://pubchemdocs.ncbi.nlm.nih.gov/pug-rest. 
+    
+Adapted from https://github.com/FibrolytixBio/cf-compound-selection-demo.
 """
 
 from typing import Any, Dict, Optional, Tuple, Union

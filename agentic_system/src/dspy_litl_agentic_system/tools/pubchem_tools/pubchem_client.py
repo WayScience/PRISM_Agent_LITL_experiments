@@ -1,7 +1,8 @@
 """
 pubchem_client.py
 
-
+HTTP client for PubChem PUG REST API incorporating a rate limiter and gentle retry.
+Adapted from https://github.com/FibrolytixBio/cf-compound-selection-demo
 """
 
 from __future__ import annotations
