@@ -12,12 +12,21 @@ from rdkit import DataStructs
 from ..tool_cache.cache_decorator import tool_cache
 from ..tool_cache.cache_config import get_fetch_limit
 from ..request_utils import _json_get
+from ..rate_limiter import FileBasedRateLimiter, make_rate_limited_decorator
 
 cache_name = "pubchem"
 PUBCHEM_VIEW_BASE_URL = "https://pubchem.ncbi.nlm.nih.gov/rest/pug_view/data/compound/{cid}/JSON"
 TIMEOUT = 30.0
+_pubchem_limiter  = FileBasedRateLimiter(
+    max_requests=2,
+    time_window=1.0,
+    name="pubchem"
+)
+rate_limited_pubchem = make_rate_limited_decorator(_pubchem_limiter)
+
 
 @tool_cache(cache_name)
+@rate_limited_pubchem
 def _search_pubchem_cid_cached(query: str):
     """
     Search for PubChem CIDs based on a compound name.
@@ -42,6 +51,7 @@ def _search_pubchem_cid_cached(query: str):
 
 
 @tool_cache(cache_name)
+@rate_limited_pubchem
 def _get_cid_properties_cached(cid: Union[int, str]) -> Dict[str, Any]:
     """
     Get various properties for a given PubChem CID.
@@ -73,6 +83,7 @@ def _get_cid_properties_cached(cid: Union[int, str]) -> Dict[str, Any]:
 
 
 @tool_cache(cache_name)
+@rate_limited_pubchem
 def _get_assay_summary_cached(cid: Union[int, str]) -> Dict[str, Any]:
     """
     Get assay summary for a given PubChem CID.
@@ -103,6 +114,7 @@ def _get_assay_summary_cached(cid: Union[int, str]) -> Dict[str, Any]:
 
 
 @tool_cache(cache_name)
+@rate_limited_pubchem
 def _get_ghs_classification_cached(cid):
     """
     Get GHS classification for a given PubChem CID.
@@ -124,6 +136,7 @@ def _get_ghs_classification_cached(cid):
 
 
 @tool_cache(cache_name)
+@rate_limited_pubchem
 def _get_drug_med_info_cached(cid: Union[int, str]) -> Dict[str, Any]:
     """
     Get drug medication information for a given PubChem CID.
@@ -146,6 +159,7 @@ def _get_drug_med_info_cached(cid: Union[int, str]) -> Dict[str, Any]:
 
 
 @tool_cache(cache_name)
+@rate_limited_pubchem
 def _get_similar_cids_cached(
     cid: Union[int, str],
     threshold: int = 90
@@ -175,6 +189,7 @@ def _get_similar_cids_cached(
 
 
 @tool_cache(cache_name)
+@rate_limited_pubchem
 def _get_fingerprint_cached(cid: Union[int, str]) -> Dict[str, Any]:
     """
     Get the fingerprint for a given PubChem CID.
@@ -193,6 +208,7 @@ def _get_fingerprint_cached(cid: Union[int, str]) -> Dict[str, Any]:
 
 
 @tool_cache(cache_name)
+@rate_limited_pubchem
 def _compute_tanimoto_cached(
     cid1: Union[int, str],
     cid2: Union[int, str]
