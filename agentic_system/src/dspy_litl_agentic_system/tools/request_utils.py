@@ -3,6 +3,7 @@ from typing import Any, Callable, Dict, Optional
 
 import requests
 
+
 def _json_get(
     url: str,
     *,
