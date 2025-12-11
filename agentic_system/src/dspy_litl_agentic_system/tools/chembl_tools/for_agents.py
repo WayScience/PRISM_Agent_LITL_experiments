@@ -13,49 +13,46 @@ Adapted from https://github.com/FibrolytixBio/cf-compound-selection-demo.
 
 from typing import Any, Dict, List
 
-from .chembl_backend import (
-    _search_chembl_id_global,
-    _get_compound_properties_global,
-    _get_compound_activities_global,
-    _get_drug_info_global,
-    _get_drug_moa_global,
-    _get_drug_indications_global,
-    _search_target_id_global,
-    _get_target_activities_summary_global,
+from .chembl_websource_backend import (
+    _search_chembl_id,
+    _get_compound_properties_cached,
+    _get_compound_activities_cached,
+    _get_drug_info_cached,
+    _get_drug_moa_cached,
+    _get_drug_indications_cached,
+    _search_target_id_cached,
+    _get_target_activities_summary_cached
 )
 
 
 def search_chembl_id(query: str, limit: int = 5) -> str:
     """
-    Search for ChEMBL IDs matching a query string that is a name or synonym.
-
-    Args:
-        query (str): The search query string.
-        limit (int): Maximum number of results to return.
-    Returns:
-        str: A formatted string with search results or an error message.
+    Search ChEMBL IDs by compound name with specified limit.
     """
-    result = _search_chembl_id_global(query)
-    if result["error"]:
-        return result["error"]
-    shown = result["compounds"][:max(0, int(limit))]
+
+    result = _search_chembl_id(query)
+    data = result.get("compounds", [])
+    error = result.get("error", None)
+
+    if error:
+        return f"Error searching ChEMBL IDs for '{query}': {error}"
+
+    if not data:
+        return f"No ChEMBL IDs found for '{query}'."
+
+    shown = data[:limit]
     return (
         f"Found {len(shown)} compound(s) matching '{query}': \n - "
         + "\n - ".join(shown)
     )
 
 
-def get_compound_properties(chembl_id: str) -> str:
+def get_compound_properties(chembl_id: str, limit: int = 5) -> str:
     """
-    Using ChEMBL ID, fetch key calculated properties and return
-    a natural language summary with context.
+    Get compound properties from ChEMBL by ChEMBL ID with specified limit.
+    """
 
-    Args:
-        chembl_id (str): The ChEMBL ID of the compound.
-    Returns:
-        str: A natural language summary of the compound's properties or an error message.
-    """
-    result = _get_compound_properties_global(chembl_id)
+    result = _get_compound_properties_cached(chembl_id)
     if result["error"]:
         return result["error"]
     summary_parts = [f"Properties of {chembl_id}:"]
@@ -149,7 +146,7 @@ def get_compound_activities(
     Returns:
         str: A natural language summary of the compound's bioactivities or an error message.
     """
-    result = _get_compound_activities_global(chembl_id, activity_type)
+    result = _get_compound_activities_cached(chembl_id, activity_type)
     if result["error"]:
         return result["error"]
     activities = result["activities"]
@@ -229,7 +226,7 @@ def get_drug_approval_status(chembl_id: str) -> str:
         str: A natural language summary of the drug's 
             approval status or an error message.
     """
-    result = _get_drug_info_global(chembl_id)
+    result = _get_drug_info_cached(chembl_id)
     if result["error"]:
         return result["error"]
     drug = result["info"][0]
@@ -255,7 +252,7 @@ def get_drug_moa(chembl_id: str, limit: int = 5) -> str:
         str: A natural language summary of the drug's mechanisms of 
             action or an error message.
     """
-    result = _get_drug_moa_global(chembl_id)
+    result = _get_drug_moa_cached(chembl_id)
     if result["error"]:
         return result["error"]
     mechanisms = result["moa"]
@@ -291,10 +288,10 @@ def get_drug_indications(chembl_id: str, limit: int = 5) -> str:
         str: A natural language summary of the drug's 
             indications or an error message.
     """
-    result = _get_drug_indications_global(chembl_id)
+    result = _get_drug_indications_cached(chembl_id)
     if result["error"]:
         return result["error"]
-    indications = result["drug_indications"]
+    indications = result["indications"]
     if indications:
         indication_summaries = []
         for ind in indications[:limit]:
@@ -325,7 +322,7 @@ def search_target_id(query: str, limit: int = 5) -> str:
     Returns:
         str: A formatted string with search results or an error message.
     """
-    result = _search_target_id_global(query)
+    result = _search_target_id_cached(query)
     if result["error"]:
         return result["error"]    
     targets = result['targets']
@@ -366,10 +363,10 @@ def get_target_activities_summary(
         str: A natural language summary of the target's 
             bioactivities or an error message.
     """
-    result = _get_target_activities_summary_global(target_chembl_id)
+    result = _get_target_activities_summary_cached(target_chembl_id)
     if result["error"]:
         return result["error"]
-    activities = result["target_activities"]
+    activities = result["activities_summary"]
 
     # Filter and sort by potency (lower standard_value is better for IC50/Ki)
     valid_activities = []
