@@ -26,11 +26,13 @@ import asyncio
 import tempfile
 import logging
 from pathlib import Path
-from typing import IO, Union
+from typing import IO, Union, Callable, TypeVar, Protocol
+from functools import wraps
 
 logger = logging.getLogger(__name__)
 
 FilePath = Union[str, Path]
+F = TypeVar("F", bound=Callable[..., object])
 _WINDOWS_LOCK_LENGTH = 1
 
 
@@ -89,6 +91,26 @@ def _unlock_file(f: IO[bytes]) -> None:
         return
 
     logger.debug("File locking unavailable; nothing to unlock")
+
+
+class SupportsAcquireSync(Protocol):
+    def acquire_sync(self) -> None: ...
+    
+
+def make_rate_limited_decorator(limiter: SupportsAcquireSync) -> Callable[[F], F]:
+    """
+    Given any limiter object with acquire_sync(), return a decorator that
+    enforces the limiter before each call to the wrapped function.
+    """
+
+    def decorator(func: F) -> F:
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            limiter.acquire_sync()
+            return func(*args, **kwargs)
+        return wrapper  # type: ignore[return-value]
+
+    return decorator
 
 
 class FileBasedRateLimiter:
