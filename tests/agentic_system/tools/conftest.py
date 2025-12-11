@@ -57,3 +57,14 @@ def make_request_process(args):
 def temp_cache_dir(tmp_path):
     """Provides a temporary cache directory."""
     return tmp_path / "test_cache"
+
+
+@pytest.fixture
+def decorated_limiter():
+    """Fixture that creates a rate limiter for decorator testing."""
+    name = f"test_decorator_{int(time.monotonic() * 1000000)}"
+    limiter = FileBasedRateLimiter(max_requests=2, time_window=1.0, name=name)
+    yield limiter
+    # Cleanup
+    if limiter.state_file.exists():
+        limiter.state_file.unlink()
