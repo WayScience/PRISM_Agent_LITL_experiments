@@ -4,17 +4,16 @@ for_agents.py
 Wrapper functions for PubChem tools, intended for use by agents.
 """
 
-from typing import Any, Dict, List, Union
+from typing import List, Union
 
-from .pubchem_backend import (
-    _search_pubchem_cids_global,
-    _get_ipuac_name_global,
-    _get_molecular_formula_global,
-    _get_cid_properties_global,
-    _get_assay_summary_global,
-    _get_ghs_classification_global,
-    _get_drug_med_info_global,
-    _get_similar_cids_global,
+from dspy_litl_agentic_system.tools.pubchem_tools.pcp_backend import (
+    _search_pubchem_cid_cached,
+    _get_cid_properties_cached,
+    _get_assay_summary_cached,
+    _get_ghs_classification_cached,
+    _get_drug_med_info_cached,
+    _get_similar_cids_cached,
+    _compute_tanimoto_cached
 )
 
 
@@ -40,7 +39,7 @@ def search_pubchem_cid(query: str, limit: int = 5) -> str:
     """
     limit = max(1, int(limit))
 
-    result = _search_pubchem_cids_global(query)
+    result = _search_pubchem_cid_cached(query)
     if result["error"]:
         return f"Error searching for compound '{query}': {result['error']}"
     cids = result["cids"][:limit]
@@ -48,8 +47,10 @@ def search_pubchem_cid(query: str, limit: int = 5) -> str:
     if not cids:
         return f"No compounds found for query '{query}'."
     elif len(cids) == 1: # only enrich results for single hit
-        name = _get_ipuac_name_global(cids[0])["name"]
-        if name:
+        properties = _get_cid_properties_cached(cids[0]).get("properties", {})
+
+        if properties:
+            name = properties.get("IUPACName") or properties.get("MolecularFormula")
             return f"Found compound '{name}' with CID {cids[0]} for {query}."
         else:
             return f"Found compound with CID {cids[0]} for {query}."
@@ -71,7 +72,7 @@ def get_properties(cid: Union[int, str]) -> str:
     Returns:
         str: Summary of molecular properties or error message.
     """
-    result = _get_cid_properties_global(cid)
+    result = _get_cid_properties_cached(cid)
     if result["error"]:
         return f"Error fetching properties for CID {cid}: {result['error']}"
 
@@ -80,6 +81,10 @@ def get_properties(cid: Union[int, str]) -> str:
         return f"No properties found for CID {cid}."
     
     summary: List[str] = [f"Properties for CID {cid}:"]
+
+    # IUPAC Name
+    name = props.get("IUPACName")
+    summary.append(f"IUPAC Name: {name}" if name else "IUPAC Name: N/A")
 
     # Molecular formula + weight
     formula = props.get("MolecularFormula")
@@ -146,6 +151,11 @@ def get_properties(cid: Union[int, str]) -> str:
         except Exception:
             pass
 
+    # Connectivity SMILES
+    smiles = props.get("ConnectivitySMILES")
+    if smiles:
+        summary.append(f"Connectivity SMILES: {smiles}")
+
     return ". ".join(summary) + "."
 
 
@@ -163,50 +173,54 @@ def get_assay_summary(cid: Union[int, str], limit: int = 5) -> str:
     """
     limit = max(0, int(limit))
 
-    result = _get_assay_summary_global(cid)
+    result = _get_assay_summary_cached(cid)
     if result["error"]:
         return f"Error fetching assay summary for CID {cid}: {result['error']}"
 
-    table = result["table"]
-    rows: List[Dict[str, Any]] = table.get("Row", []) or []
-    if not rows:
+    table = result.get("table", {})    
+    columns = table.get("Columns", {}).get("Column", [])
+    rows = [row.get("Cell", []) for row in table.get("Row", []) if 'Cell' in row]
+    if not columns or not rows:
         return f"No assay data found for CID {cid}."
-    
-    columns: List[str] = table.get("Column", []) or []
+
+    outcome_col_i = columns.index("Activity Outcome") if "Activity Outcome" in columns else None
+    if not outcome_col_i:
+        print("No 'Activity Outcome' column found")
+    name_col_i = columns.index("Assay Name") if "Assay Name" in columns else None
+    type_col_i = columns.index("Assay Type") if "Assay Type" in columns else None
 
     active, inactive, inconclusive = [], [], []
     for row in rows:
-        cells = row.get("Cell", []) or []
-        assay = {}
-        for i, cell in enumerate(cells):
-            if i < len(columns):
-                assay[columns[i]] = cell
-        outcome = str(assay.get("Outcome", "")).lower()
-        if "Active" in outcome:
-            active.append(assay)
-        elif "Inactive" in outcome:
-            inactive.append(assay)
+        if row[outcome_col_i].lower() == "active":
+            active.append(row)
+        elif row[outcome_col_i].lower() == "inactive":
+            inactive.append(row)
         else:
-            inconclusive.append(assay)
+            inconclusive.append(row)
 
-    parts = [
-        f"Assay summary for CID {cid}:",
-        f"- Active in {len(active)} assay(s)",
-        f"- Inactive in {len(inactive)} assay(s)",
-        f"- Inconclusive in {len(inconclusive)} assay(s)",
-    ]
-    if active: 
-        parts.append("\nActive in:")
-        for a in active[:limit]:
-            aid = a.get("AID", "N/A")
-            name = a.get("Assay Name", "N/A")
-            if name and len(name) > 100:
-                name = name[:97] + "..."
-            parts.append(f"• AID {aid}: {name} \n")
-    if len(active) > limit:
-        parts.append(f"(Showing {limit} of {len(active)} active assays)")
-    
-    return "\n".join(parts)
+    # Ugly nested if statements but works for now
+    details = []
+    for a in active:
+        if name_col_i is not None:
+            name = a[name_col_i]
+            if name and len(name) > 200:
+                name = name[:197] + "..."
+                if type_col_i is not None:
+                    atype = a[type_col_i]
+                    details.append(f"{name} (Type: {atype})")
+        if len(details) >= limit:
+            break    
+
+    if details:
+        active_details = f"\nFirst {limit} active assays:\n" + "\n".join(f"• {d}" for d in details)
+
+    return (
+        f"Assay summary for CID {cid}:"
+        f"- Active in {len(active)} assay(s)"
+        f"- Inactive in {len(inactive)} assay(s)"
+        f"- Inconclusive in {len(inconclusive)} assay(s)"
+        + (active_details if details else "")
+    )
 
 
 def get_safety_summary(cid: Union[int, str]) -> str:
@@ -217,7 +231,7 @@ def get_safety_summary(cid: Union[int, str]) -> str:
     Returns:
         str: Summary of GHS classification or error message.
     """
-    result = _get_ghs_classification_global(cid)
+    result = _get_ghs_classification_cached(cid)
     if result["error"]:
         return f"Error fetching GHS classification for CID {cid}: {result['error']}"
 
@@ -271,7 +285,7 @@ def get_drug_summary(cid: Union[int, str]) -> str:
     Returns:
         str: Summary of drug/medication information or error message.
     """
-    result = _get_drug_med_info_global(cid)
+    result = _get_drug_med_info_cached(cid)
     if result["error"]:
         return f"Error fetching drug/medication info for CID {cid}: {result['error']}"
 
@@ -346,7 +360,7 @@ def find_similar_compounds(
     """
     limit = max(1, int(limit))
 
-    result = _get_similar_cids_global(cid, threshold)
+    result = _get_similar_cids_cached(cid, threshold)
     if result["error"]:
         return f"Error fetching similar compounds for CID {cid}: {result['error']}"
 
@@ -360,14 +374,34 @@ def find_similar_compounds(
     ]
 
     for similar_cid in similar_cids[:limit]:
-        # alternatively could submit batch request, thought since caching
-        # is enabled for this project doing individual search would be faster
-        # in the long run.
-        name_result = _get_ipuac_name_global(similar_cid)
-        name = name_result["name"] if not name_result["error"] else 'N/A'
-        formula_result = _get_molecular_formula_global(similar_cid)
-        formula = formula_result["molecular_formula"] if not formula_result["error"] else 'N/A'
-
-        parts.append(f"{similar_cid} | {name} | {formula}")
+        props_result = _get_cid_properties_cached(similar_cid)
+        if props_result["error"]:
+            parts.append(f"{similar_cid} | Error fetching properties | Error fetching properties")
+        else:
+            props = props_result.get("properties", {})
+            iupac_name = props.get("IUPACName", "N/A")
+            molecular_formula = props.get("MolecularFormula", "N/A")
+            parts.append(f"{similar_cid} | {iupac_name} | {molecular_formula}")
 
     return "\n".join(parts)
+
+
+def compute_tanimoto(cid1: Union[int, str], cid2: Union[int, str]) -> str:
+    """
+    Compute Tanimoto similarity between two PubChem CIDs based on their fingerprints.
+
+    Args:
+        cid1 (int | str): First PubChem Compound ID.
+        cid2 (int | str): Second PubChem Compound ID.
+    Returns:
+        str: Tanimoto similarity score or error message.
+    """
+    result = _compute_tanimoto_cached(cid1, cid2)
+    if result["error"]:
+        return f"Error computing Tanimoto similarity between CID {cid1} and CID {cid2}: {result['error']}"
+
+    tanimoto = result.get("tanimoto")
+    if tanimoto is None:
+        return f"Tanimoto similarity could not be computed between CID {cid1} and CID {cid2}."
+
+    return f"Tanimoto similarity between CID {cid1} and CID {cid2} is {tanimoto:.4f}."
