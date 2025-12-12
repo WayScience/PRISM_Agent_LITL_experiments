@@ -28,6 +28,7 @@ dependencies = [
   "chembl_webresource_client",
   "pubchempy",
   "rdkit",
+  "cellosaurus_mcp",
 ]
 
 [project.optional-dependencies]
