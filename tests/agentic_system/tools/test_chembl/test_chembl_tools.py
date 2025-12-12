@@ -3,6 +3,17 @@ Basic pytest tests for ChEMBL tools.
 Tests each function with known working queries from the notebook.
 """
 
+import pytest
+
+try:
+    # This import triggers the schema fetch at import-time inside the library.
+    from chembl_webresource_client.new_client import new_client  # noqa: F401
+except Exception as e:
+    pytest.skip(
+        f"ChEMBL client unavailable (chembl_webresource_client failed to init): {e}",
+        allow_module_level=True,
+    )
+
 from dspy_litl_agentic_system.tools.chembl_tools.for_agents import (
     search_chembl_id,
     get_compound_properties,
