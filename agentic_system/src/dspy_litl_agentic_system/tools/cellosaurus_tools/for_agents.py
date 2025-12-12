@@ -5,8 +5,8 @@ Convenience entry points for Cellosaurus tools for use by agents.
 """
 
 from .backend import (
-    _search_ac_global,
-    _get_ac_summary_global
+    _search_ac_cached,
+    _get_ac_info_cached
 )
 
 
@@ -21,9 +21,9 @@ def search_cellosaurus_ac(query: str) -> str:
         str: Search results with Cellosaurus ACs or error/no match message
     """
     try:
-        ac_list = _search_ac_global(query)
-    except Exception:
-        return f"Error searching Cellosaurus for '{query}'"
+        ac_list = _search_ac_cached(query)
+    except Exception as e:
+        return f"Error searching Cellosaurus for '{query}': {e}"
     
     if not ac_list:
         return f"No Cellosaurus match for '{query}'"
@@ -44,23 +44,20 @@ def get_cellosaurus_summary(ac: str) -> str:
     """
     
     try:
-        record = _get_ac_summary_global(ac)
-    except Exception:
-        return f"Error fetching Cellosaurus summary for AC '{ac}'"
+        info = _get_ac_info_cached(ac)
+    except Exception as e:
+        return f"Error fetching Cellosaurus summary for AC '{ac}': {e}"
     
-    if not record:
+    if not info:
         return f"No Cellosaurus record found for AC '{ac}'"
     
-    parts = [f"Cellosaurus summary for AC '{ac}':"]
-    if record.get("recommended_name"):
-        parts.append(f"- Recommended Name: {record['recommended_name']}")
-    if record.get("species"):
-        parts.append(f"- Species: {', '.join(record['species'][:3])}")
-    if record.get("tissues"):
-        parts.append(f"- Tissues: {', '.join(record['tissues'][:3])}")
-    if record.get("diseases"):
-        parts.append(f"- Diseases: {', '.join(record['diseases'][:3])}")
-    if record.get("cell_type"):
-        parts.append(f"- Cell Type: {', '.join(record['cell_type'][:3])}")
+    summary_lines = [f"Cellosaurus Summary for AC '{ac}':"]
+    for key, value in info.items():
+        line = f"- {key.replace('_', ' ').title()}: "
+        if isinstance(value, list):
+            line += ", ".join(value) if value else "N/A"
+        else:
+            line += str(value) if value else "N/A"
+        summary_lines.append(line[:197] + ("..." if len(line) > 200 else ""))
 
-    return "\n".join(parts)
+    return "\n".join(summary_lines)
