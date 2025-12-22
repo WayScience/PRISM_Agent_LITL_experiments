@@ -9,8 +9,16 @@ Also uses tenacity for retrying failed requests with exponential backoff.
 """
 
 from typing import Any, Dict, Optional
+from functools import lru_cache
 
 import requests
+from chembl_webresource_client.http_errors import (
+    HttpTooManyRequests,
+    HttpApplicationError,
+    HttpBadGateway,
+    HttpServiceUnavailable,
+    HttpGatewayTimeout,
+)
 from tenacity import (
     retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 )
@@ -34,7 +42,15 @@ rate_limited_chembl = make_rate_limited_decorator(_chembl_limiter)
 
 # retry config
 TENACITY_CONFIG = {
-    "retry": retry_if_exception_type(requests.exceptions.RequestException),
+    "retry": retry_if_exception_type((
+        requests.exceptions.RequestException,
+        HttpTooManyRequests,
+        HttpApplicationError,
+        HttpBadGateway,
+        HttpServiceUnavailable,
+        HttpGatewayTimeout,
+        )
+    ),
     "stop": stop_after_attempt(4),
     "wait": wait_exponential(multiplier=1.0, min=1, max=5),
     "reraise": True
@@ -42,18 +58,21 @@ TENACITY_CONFIG = {
 
 # ChEMBL webresource config
 TIMEOUT = 30.0
-try:
+@lru_cache(maxsize=1)
+def get_chembl_client():
+    """
+    Lazy load and cache the ChEMBL client to allow for
+        tenacity retry upon chembl client initialization failures.
+    """
     from chembl_webresource_client.settings import Settings
     Settings.Instance().TIMEOUT = TIMEOUT
-    from chembl_webresource_client.new_client import new_client as chembl_client
+    from chembl_webresource_client.new_client import new_client
     available_resources = [
-        resource for resource in dir(chembl_client) if not resource.startswith('_')
+        resource for resource in dir(new_client) if not resource.startswith('_')
     ]
-except Exception as e:
-    raise ImportError(
-        "Failed to import chembl_webresource_client or service is not available. "
-        f"Please ensure it is installed or available. Original error: {e}"           
-    )
+    if not available_resources:
+        raise ValueError("No resources available in ChEMBL client.")
+    return new_client
 
 
 @tool_cache(cache_name)
@@ -66,7 +85,7 @@ def _search_chembl_molecule_cached(query: str) -> Dict[str, Any]:
     """
 
     # force evalaute so cache serialization works properly
-    results = list(chembl_client.molecule.search(query)[:get_fetch_limit()])
+    results = list(get_chembl_client().molecule.search(query)[:get_fetch_limit()])
     
     return {"results": results, "error": None}
 
@@ -104,7 +123,7 @@ def _get_compound_properties_cached(chembl_id: str) -> Dict[str, Any]:
     """
     
     results = list(
-        chembl_client.molecule.filter(
+        get_chembl_client().molecule.filter(
             chembl_id=chembl_id
         ).only(
             ['molecule_chembl_id', 'pref_name', 'molecule_properties']
@@ -139,7 +158,7 @@ def _get_compound_activities_cached(
     """
     
     results = list(
-        chembl_client.activity.filter(
+        get_chembl_client().activity.filter(
             molecule_chembl_id=chembl_id,
             **{"activity_type": activity_type} if activity_type else {}
         )[:get_fetch_limit()]
@@ -159,7 +178,7 @@ def _get_drug_info_cached(chembl_id: str) -> Dict[str, Any]:
     Get drug information from ChEMBL by ChEMBL ID.
     """
     
-    results = list(chembl_client.drug.filter(chembl_id=chembl_id)[:get_fetch_limit()])
+    results = list(get_chembl_client().drug.filter(chembl_id=chembl_id)[:get_fetch_limit()])
 
     return {
         "info": results or [],
@@ -175,7 +194,7 @@ def _get_drug_moa_cached(chembl_id: str) -> Dict[str, Any]:
     Get drug mechanism of action from ChEMBL by ChEMBL ID.
     """
 
-    results = list(chembl_client.mechanism.filter(chembl_id=chembl_id)[:get_fetch_limit()])
+    results = list(get_chembl_client().mechanism.filter(chembl_id=chembl_id)[:get_fetch_limit()])
 
     return {
         "moa": results or [],
@@ -191,7 +210,7 @@ def _get_drug_indications_cached(chembl_id: str) -> Dict[str, Any]:
     Get drug indications from ChEMBL by ChEMBL ID.
     """
 
-    results = list(chembl_client.drug_indication.filter(chembl_id=chembl_id)[:get_fetch_limit()])
+    results = list(get_chembl_client().drug_indication.filter(chembl_id=chembl_id)[:get_fetch_limit()])
 
     return {
         "indications": results or [],
@@ -208,7 +227,7 @@ def _search_target_id_cached(query: str) -> Dict[str, Any]:
     Query can be any string (target name, synonym, etc).
     """
 
-    results = list(chembl_client.target.search(query)[:get_fetch_limit()])
+    results = list(get_chembl_client().target.search(query)[:get_fetch_limit()])
 
     return {
         "targets": results or [],
@@ -228,7 +247,7 @@ def _get_target_activities_summary_cached(
     """
 
     results = list(
-        chembl_client.activity.filter(
+        get_chembl_client().activity.filter(
             target_chembl_id=target_chembl_id,
             **{"activity_type": activity_type} if activity_type else {}
         )[:get_fetch_limit()]
