@@ -26,7 +26,7 @@ import asyncio
 import tempfile
 import logging
 from pathlib import Path
-from typing import IO, Union, Callable, TypeVar, Protocol
+from typing import IO, Union, Callable, TypeVar, Protocol, Optional
 from functools import wraps
 
 logger = logging.getLogger(__name__)
@@ -34,6 +34,9 @@ logger = logging.getLogger(__name__)
 FilePath = Union[str, Path]
 F = TypeVar("F", bound=Callable[..., object])
 _WINDOWS_LOCK_LENGTH = 1
+
+_TIME_FUNC: Callable[[], float] = time.time
+_STATE_DIR: Optional[Path] = None
 
 
 # --- Platform-specific imports ------------------------------------------------
@@ -93,6 +96,45 @@ def _unlock_file(f: IO[bytes]) -> None:
     logger.debug("File locking unavailable; nothing to unlock")
 
 
+# --- Config setter/getter -----------------------------------------------------
+
+
+def set_default_time_func(
+    time_func: Callable[[], float]
+) -> None:
+    
+    if not callable(time_func):
+        raise TypeError("time_func must be callable")
+
+    global _TIME_FUNC
+    _TIME_FUNC = time_func
+
+
+def resolve_default_time_func() -> Callable[[], float]:
+    return _TIME_FUNC
+
+
+def set_default_state_dir(
+    state_dir: FilePath
+) -> None:
+    
+    if not isinstance(state_dir, (str, Path)):
+        raise TypeError("state_dir must be a str or Path")
+    
+    if not Path(state_dir).is_dir():
+        raise ValueError(f"state_dir '{state_dir}' is not a valid directory")
+
+    global _STATE_DIR
+    _STATE_DIR = Path(state_dir)
+
+
+def resolve_default_state_dir() -> Optional[Path]:
+    return _STATE_DIR
+
+
+# --- Rate limiter -------------------------------------------------------------
+
+
 class SupportsAcquireSync(Protocol):
     def acquire_sync(self) -> None: ...
     
@@ -119,7 +161,8 @@ class FileBasedRateLimiter:
     across multiple processes and threads.
 
     How it works:
-    1. Request timestamps are stored as monotonic time values in a JSON file
+    1. Request timestamps are stored as user specified time function 
+        return values in a JSON file
         with file locking for thread safety
     2. Wall-clock time is recorded to detect reboots
     3. Before each request, old timestamps outside the time window are removed
@@ -136,13 +179,14 @@ class FileBasedRateLimiter:
         self, 
         max_requests: int = 3, 
         time_window: float = 1.0, 
-        name: str = "default"
+        name: str = "default",
     ):
         """
         Initialize the rate limiter.
         
         :param max_requests: Maximum requests allowed in the time window
         :param time_window: Time window in seconds
+        :param name: Name for the rate limiter (used in state file name)
         """
         if not isinstance(max_requests, int) or max_requests <= 0:
             raise ValueError(
@@ -155,8 +199,13 @@ class FileBasedRateLimiter:
         
         self.max_requests = max_requests
         self.time_window = time_window
-        temp_dir = Path(tempfile.gettempdir())
-        self.state_file = temp_dir / f"{name}_rate_limiter.json"
+        self.time_func = resolve_default_time_func()
+        self.state_dir = resolve_default_state_dir()
+        if self.state_dir is None:
+            temp_dir = Path(tempfile.gettempdir())
+            self.state_file = temp_dir / f"{name}_rate_limiter.json"
+        else:
+            self.state_file = Path(self.state_dir) / f"{name}_rate_limiter.json"
         # Store current wall-clock time to detect reboots
         self._init_wall_time = time.time()
 
@@ -196,7 +245,7 @@ class FileBasedRateLimiter:
                 _lock_file(f)
                 try:
                     data = self._read_and_validate_state(f)
-                    now_monotonic = time.monotonic()
+                    now_ts = self.time_func()
                     now_wall = time.time()
                     
                     # Detect reboots: if wall-clock time went backward significantly,
@@ -216,21 +265,21 @@ class FileBasedRateLimiter:
                     
                     # Filter out old requests using monotonic time
                     data["requests"] = [
-                        t for t in data["requests"] if now_monotonic - t < self.time_window
+                        t for t in data["requests"] if now_ts - t < self.time_window
                     ]
                     
                     if len(data["requests"]) >= self.max_requests:
                         oldest = data["requests"][0]
-                        wait = self.time_window - (now_monotonic - oldest)
+                        wait = self.time_window - (now_ts - oldest)
                         if wait > 0:
                             time.sleep(wait)
-                            now_monotonic = time.monotonic()
+                            now_ts = self.time_func()
                             data["requests"] = [
                                 t for t in data["requests"]\
-                                    if now_monotonic - t < self.time_window
+                                    if now_ts - t < self.time_window
                             ]
                     
-                    data["requests"].append(now_monotonic)
+                    data["requests"].append(now_ts)
                     self._write_state(f, data)
                 finally:
                     _unlock_file(f)
@@ -260,7 +309,7 @@ class FileBasedRateLimiter:
             
             if not content:
                 logger.debug("Empty state file, initializing fresh state")
-                return {"requests": []}
+                return {"requests": [], "boot_wall_time": time.time()}
             
             data = json.loads(content)
             
@@ -285,7 +334,7 @@ class FileBasedRateLimiter:
                 "Resetting to fresh state with full capacity."
             )
             # Return fresh state, allowing full capacity
-            return {"requests": []}
+            return {"requests": [], "boot_wall_time": time.time()}
 
     def _write_state(self, f, data):
         """
@@ -299,6 +348,7 @@ class FileBasedRateLimiter:
             f.truncate()
             json.dump(data, f)
             f.flush()
+            os.fsync(f.fileno())
         except (OSError, IOError) as e:
             logger.error(f"Failed to write state file: {e}")
             # Continue without updating state - conservative approach
