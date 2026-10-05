@@ -114,7 +114,6 @@ class ContextInjector:
     def __call__(self, *, drug_name: str, cell_line: Optional[str] = None) -> str:
         return build_drug_context(
             drug_name=drug_name,
-            cell_line=cell_line,
             id_limit=self.id_limit,
             activity_type=self.activity_type,
         )
