@@ -9,16 +9,14 @@ import pandas as pd
 
 from .batchie_config import CONDITION_COLUMNS, DOSE_COLUMN, MODEL_COLUMN, RESPONSE_COLUMN
 from .models import BayesianResponseModel
-from .gibbs import GibbsPosterior, sample_posterior
-from .low_rank import MaskedLowRankModel
-from .model_utils import _group_row_indices
+from .posterior import Posterior
 
-__all__ = ["BayesianFixedDoseModel", "MaskedLowRankModel", "GibbsPosterior"]
+__all__ = ["BayesianFixedDoseModel", "Posterior"]
 
 
 class BayesianFixedDoseModel(BayesianResponseModel):
     """
-    Fixed-dose Gaussian factorization with conjugate Gibbs sampling.
+    Fixed-dose Gaussian factorization with PyMC NUTS sampling.
     Adapted from BATCHIE (Tosh et al., 2025, 10.1038/s41467-024-55287-7) for monotherapy screens.
 
     Fits observed log2-fold-changes in a viability screen as:
@@ -32,7 +30,7 @@ class BayesianFixedDoseModel(BayesianResponseModel):
         "natured" interactions between the same compound and different models and vice versa.
 
     Class parameters are primarily hyperparameters that control rank (model complexity), 
-        the sampling schedule with gibbs sampling, and priors on what the
+        the MCMC sampling schedule, and priors on what the
         distributions for model parameters should be. 
     """
 
@@ -47,22 +45,36 @@ class BayesianFixedDoseModel(BayesianResponseModel):
         prior_rate: float = 1.1,
         global_precision: float = 0.01,
         seed: int = 0,
+        backend: str = "pymc",
+        chains: int = 1,
+        target_accept: float = 0.9,
     ) -> None:
         """
         Initialize the BayesianFixedDoseModel with the specified hyperparameters.
 
         :param rank: Dimensionality of the low-rank interaction embeddings.
-        :param burnin: Number of initial Gibbs sampling sweeps to discard.
-        :param posterior_samples: Number of posterior samples to retain after burnin.
+        :param burnin: Gibbs burn-in sweeps or PyMC NUTS tuning steps.
+        :param posterior_samples: Retained draws per chain after burn-in and thinning.
         :param thin: Thinning interval for posterior samples.
         :param prior_shape: Shape parameter for the Gamma prior on precision terms.
         :param prior_rate: Rate parameter for the Gamma prior on precision terms.
         :param global_precision: Precision of the global intercept prior.
         :param seed: Random seed for reproducibility.
+        :param backend: "pymc" (default, NUTS) or "gibbs" (not implemented yet).
+        :param chains: Number of PyMC chains, run sequentially; Gibbs requires one.
+        :param target_accept: PyMC NUTS target acceptance probability.
         """
         values = [rank, burnin, posterior_samples, thin, prior_shape, prior_rate, global_precision]
         if any(value <= 0 for value in values):
             raise ValueError("All model hyperparameters must be positive")
+        if backend not in {"gibbs", "pymc"}:
+            raise ValueError("backend must be 'gibbs' or 'pymc'")
+        if not isinstance(chains, int) or chains < 1 or (backend == "gibbs" and chains != 1):
+            raise ValueError("chains must be positive; the Gibbs backend requires chains=1")
+        if backend == "gibbs":
+            raise NotImplementedError("Gibbs backend is not implemented yet")
+        if not 0 < target_accept < 1:
+            raise ValueError("target_accept must be between zero and one")
         
         self.rank = rank
         self.burnin = burnin
@@ -72,6 +84,10 @@ class BayesianFixedDoseModel(BayesianResponseModel):
         self.prior_rate = prior_rate
         self.global_precision = global_precision
         self.seed = seed
+        self.backend = backend
+        self.chains = chains
+        self.target_accept = target_accept
+        self.inference_data_ = None
         self._is_fitted = False
 
     def fit(self, observed_data: pd.DataFrame) -> "BayesianFixedDoseModel":
@@ -100,17 +116,28 @@ class BayesianFixedDoseModel(BayesianResponseModel):
         compound_ids = observed_data["broad_id"].map(compound_index).to_numpy(dtype=int)
         responses = observed_data[RESPONSE_COLUMN].to_numpy(dtype=float)
 
-        model_rows = _group_row_indices(model_ids, len(models))
-        compound_rows = _group_row_indices(compound_ids, len(compounds))
-
         self.models_ = models
         self.compounds_ = compounds
         self.fixed_dose_ = float(observed_data[DOSE_COLUMN].iloc[0])
         self.model_index_ = model_index
         self.compound_index_ = compound_index
-        self.posterior_ = sample_posterior(
-            responses, model_ids, compound_ids, model_rows, compound_rows, self
-        )
+        self._is_fitted = False
+        self.inference_data_ = None
+        if self.backend == "pymc":
+            from .pymc_backend import sample_posterior as sample_pymc
+
+            self.posterior_, self.inference_data_ = sample_pymc(
+                responses, model_ids, compound_ids, self
+            )
+        else:
+            from .gibbs import sample_posterior
+            from .model_utils import _group_row_indices
+
+            self.posterior_ = sample_posterior(
+                responses, model_ids, compound_ids,
+                _group_row_indices(model_ids, len(models)),
+                _group_row_indices(compound_ids, len(compounds)), self,
+            )
         self._is_fitted = True
         return self
 
