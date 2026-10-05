@@ -29,7 +29,8 @@ dependencies = [
   "pubchempy",
   "rdkit",
   "cellosaurus_mcp",
-  "sentence_transformers"
+  "sentence_transformers",
+  "pymc",
 ]
 
 [project.optional-dependencies]
