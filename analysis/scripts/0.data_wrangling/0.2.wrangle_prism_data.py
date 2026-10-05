@@ -230,18 +230,14 @@ print("Unique model x compound x dose x screen keys:", observed_response[key_col
 observed_response.head()
 
 
-# In[5]:
-
-
-[s for s in observed_response["column_name"].tolist() if s.endswith("_PR500")]
-
-
 # ## Write the Parquet output
 # 
 # The final cell writes the complete `observed_response` table—not just the displayed preview—to the path defined in the setup cell. The output is saved without a pandas index and can be loaded later with `pandas.read_parquet`. Running the save cell again overwrites the existing output file.
 
-# In[6]:
+# In[5]:
 
 
-observed_response.to_parquet(out_file, index=False)
+# drop the "panel_identity" column from the observed_response DataFrame before saving to parquet
+# this helps with reducing the size of the saved parquet file so github is happier
+observed_response.drop(columns=["panel_identity"], errors="ignore").to_parquet(out_file, index=False)
 
