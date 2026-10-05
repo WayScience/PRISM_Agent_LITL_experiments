@@ -13,6 +13,9 @@
 
 
 from pathlib import Path
+import os
+import tempfile
+
 import requests
 
 import pandas as pd
@@ -77,21 +80,35 @@ def download_file(url: str, out_path: Path, chunk_size: int = 1 << 20) -> None:
 
         r.raise_for_status()
 
-        # DepMap can return an anti-bot verification HTML page instead of CSV.
         if "depmap.org" in url:
             content_type = (r.headers.get("content-type") or "").lower()
             if "text/html" in content_type:
-                preview = r.text[:5000].lower()
-                if "verification" in preview and "enter depmap" in preview:
-                    raise RuntimeError(
-                        "DepMap verification blocked programmatic download. "
-                        "Download Model.csv in browser and place it at data/Model.csv."
-                    )
+                raise RuntimeError(
+                    "DepMap returned an HTML response instead of CSV. "
+                    "Download Model.csv in browser and place it at data/Model.csv."
+                )
 
-        with out_path.open("wb") as f:
-            for chunk in r.iter_content(chunk_size=chunk_size):
-                if chunk:
-                    f.write(chunk)
+        temp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="wb",
+                dir=out_path.parent,
+                prefix=f".{out_path.name}.",
+                suffix=".tmp",
+                delete=False,
+            ) as f:
+                temp_path = Path(f.name)
+                for chunk in r.iter_content(chunk_size=chunk_size):
+                    if chunk:
+                        f.write(chunk)
+
+            os.replace(temp_path, out_path)
+        finally:
+            if temp_path is not None:
+                try:
+                    temp_path.unlink()
+                except FileNotFoundError:
+                    pass
 
 
 # In[4]:
