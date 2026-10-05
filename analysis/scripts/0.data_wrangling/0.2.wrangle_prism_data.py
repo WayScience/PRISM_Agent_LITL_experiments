@@ -65,10 +65,12 @@ out_file = data_path / "secondary-screen-observed-response-long.parquet"
 # 1. Reshape the response matrix from wide to long format, producing one record per model and encoded treatment.
 # 2. Exclude rows whose model identifier contains `FAILED` and remove records with missing log-fold-change values.
 # 3. Join treatment annotations by the exact encoded treatment key, then enrich records with model metadata by `ModelID`. Both joins are checked as many-to-one; unmatched treatment rows are reported.
-# 4. Enforce one record per `ModelID`, compound (`broad_id`), dose, and screen. If repeated records share that key, their log-fold changes are averaged and the remaining annotations are taken from the first record in the group.
-# 5. Convert dose values to numeric where possible and sort the resulting table for easier inspection.
+# 4. Extract `panel_identity` from the `_PR500` suffix in `column_name`, then map it to `cell_line_type`: `PR500` means an adherent cell line, while non-PR500 means a suspension cell line.
+# 5. Average repeated measurements only within the same `ModelID`, compound (`broad_id`), dose, screen, and panel. Missing grouping values are retained during aggregation.
+# 6. For identified model–compound–dose experiments, retain the highest-reliability screen (`MTS010 > MTS006 > MTS005 > HTS002`), then prefer `PR500` over `not PR500` within that screen. Unranked/missing screens rank below the named screens; ties are retained. Rows with missing model, compound, or dose keys are retained because their experiment identity cannot be safely compared. See [here](https://forum.depmap.org/t/question-about-duplicated-measures-in-prism-mts010-screen-auc-data/83?utm_source=chatgpt.com) for details.
+# 7. Convert dose values to numeric where possible and sort the resulting table for easier inspection.
 # 
-# Keeping `screen_id` in the key preserves separate measurements from different screens. Missing/unparseable dose values are retained as missing rather than discarded.
+# Keeping screen and panel in the within-screen aggregation key preserves separate measurements until priority selection. Missing/unparseable dose values and unmatched treatment metadata are retained.
 
 # In[3]:
 
@@ -81,6 +83,15 @@ obs_long = lfc_df.rename(columns={cell_id_col: "ModelID"}).melt(
     id_vars="ModelID",
     var_name="column_name",
     value_name="logfold_change",
+)
+# Preserve the panel marker and derive the corresponding cell-line growth type.
+obs_long["panel_identity"] = (
+    obs_long["column_name"]
+    .str.extract(r"_(PR500)$", expand=False)
+    .fillna("not PR500")
+)
+obs_long["cell_line_type"] = obs_long["panel_identity"].map(
+    {"PR500": "adherent cell line", "not PR500": "suspension cell line"}
 )
 
 # Remove known failed profiles and missing responses.
@@ -121,42 +132,85 @@ observed_response = obs_with_treatment.merge(
     validate="many_to_one",
 )
 
-# 4) Keep one row per ModelID x compound x dose x screen.
-key_cols = ["ModelID", "broad_id", "dose", "screen_id"]
-dup_mask = observed_response.duplicated(subset=key_cols, keep=False)
-if dup_mask.any():
-    print(f"Found {dup_mask.sum()} duplicated rows for key {key_cols}; collapsing by mean LFC.")
-    observed_response = (
-        observed_response
-        .groupby(key_cols, as_index=False)
-        .agg({
-            "logfold_change": "mean",
-            "column_name": "first",
-            "compound_plate": "first",
-            "name": "first",
-            "moa": "first",
-            "target": "first",
-            "disease.area": "first",
-            "indication": "first",
-            "smiles": "first",
-            "phase": "first",
-            "CellLineName": "first",
-            "StrippedCellLineName": "first",
-            "DepmapModelType": "first",
-            "OncotreeLineage": "first",
-            "OncotreePrimaryDisease": "first",
-            "OncotreeSubtype": "first",
-            "OncotreeCode": "first",
-            "TissueOrigin": "first",
-            "ModelType": "first",
-        })
+# 4) Average duplicates only within the same model/compound/dose/screen/panel.
+screen_key_cols = ["ModelID", "broad_id", "dose", "screen_id", "panel_identity"]
+experiment_key_cols = ["ModelID", "broad_id", "dose"]
+annotation_agg = {
+    "logfold_change": "mean",
+    "column_name": "first",
+    "cell_line_type": "first",
+    "compound_plate": "first",
+    "name": "first",
+    "moa": "first",
+    "target": "first",
+    "disease.area": "first",
+    "indication": "first",
+    "smiles": "first",
+    "phase": "first",
+    "CellLineName": "first",
+    "StrippedCellLineName": "first",
+    "DepmapModelType": "first",
+    "OncotreeLineage": "first",
+    "OncotreePrimaryDisease": "first",
+    "OncotreeSubtype": "first",
+    "OncotreeCode": "first",
+    "TissueOrigin": "first",
+    "ModelType": "first",
+}
+within_screen_duplicates = observed_response.duplicated(
+    subset=screen_key_cols,
+    keep=False,
+).sum()
+if within_screen_duplicates:
+    print(
+        f"Averaging {within_screen_duplicates} duplicate rows within "
+        f"{screen_key_cols}."
     )
-else:
-    observed_response = observed_response.drop_duplicates(subset=key_cols).copy()
+observed_response = (
+    observed_response
+    .groupby(screen_key_cols, as_index=False, dropna=False)
+    .agg(annotation_agg)
+)
+
+# 5) Select by screen reliability first, then prefer PR500 within the best screen.
+screen_reliability = ["MTS010", "MTS006", "MTS005", "HTS002"]
+screen_rank = {screen_id: rank for rank, screen_id in enumerate(screen_reliability)}
+identified_experiment = observed_response[experiment_key_cols].notna().all(axis=1)
+identified = observed_response.loc[identified_experiment].copy()
+identified["_screen_rank"] = (
+    identified["screen_id"].map(screen_rank).fillna(len(screen_reliability)).astype(int)
+)
+best_screen_rank = identified.groupby(
+    experiment_key_cols,
+    dropna=False,
+)["_screen_rank"].transform("min")
+best_screen = identified.loc[identified["_screen_rank"].eq(best_screen_rank)].copy()
+best_screen["_panel_rank"] = best_screen["panel_identity"].ne("PR500").astype(int)
+best_panel_rank = best_screen.groupby(
+    experiment_key_cols,
+    dropna=False,
+)["_panel_rank"].transform("min")
+selected_screens = best_screen.loc[
+    best_screen["_panel_rank"].eq(best_panel_rank)
+].drop(columns=["_screen_rank", "_panel_rank"])
+
+# Keep rows with incomplete experiment keys; their compound/dose identity is ambiguous.
+unidentified = observed_response.loc[~identified_experiment]
+dropped_lower_priority = len(identified) - len(selected_screens)
+observed_response = pd.concat(
+    [selected_screens, unidentified],
+    ignore_index=True,
+)
+if dropped_lower_priority:
+    print(
+        f"Dropped {dropped_lower_priority} lower-priority rows; priority is "
+        f"screen {' > '.join(screen_reliability)}, then PR500 > not PR500."
+    )
 
 # Standardize ordering and types.
 observed_response["dose"] = pd.to_numeric(observed_response["dose"], errors="coerce")
 observed_response = observed_response.sort_values(["ModelID", "name", "dose", "screen_id"]).reset_index(drop=True)
+key_cols = ["ModelID", "broad_id", "dose", "screen_id"]
 
 print("Observed response table shape:", observed_response.shape)
 print("Unique models:", observed_response["ModelID"].nunique())
@@ -176,11 +230,17 @@ print("Unique model x compound x dose x screen keys:", observed_response[key_col
 observed_response.head()
 
 
+# In[5]:
+
+
+[s for s in observed_response["column_name"].tolist() if s.endswith("_PR500")]
+
+
 # ## Write the Parquet output
 # 
 # The final cell writes the complete `observed_response` table—not just the displayed preview—to the path defined in the setup cell. The output is saved without a pandas index and can be loaded later with `pandas.read_parquet`. Running the save cell again overwrites the existing output file.
 
-# In[5]:
+# In[6]:
 
 
 observed_response.to_parquet(out_file, index=False)
