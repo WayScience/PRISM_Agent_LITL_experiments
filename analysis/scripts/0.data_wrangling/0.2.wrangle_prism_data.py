@@ -6,8 +6,6 @@
 # This notebook converts the DepMap PRISM secondary-screen log-fold-change matrix into a tidy, analysis-ready table. It joins each measured response to compound/treatment annotations and DepMap model metadata, then writes the result as a Parquet file.
 # 
 # **Output:** `data/secondary-screen-observed-response-long.parquet` (relative to the repository root).
-# 
-# Run the cells from top to bottom. The input-loading cell locates the repository by searching upward for `pyproject.toml`, so the notebook can be launched from a subdirectory within the repository.
 
 # In[1]:
 
@@ -20,9 +18,17 @@ import pandas as pd
 # In[2]:
 
 
-repo_root = Path.cwd().resolve()
-while repo_root != repo_root.parent and not (repo_root / "pyproject.toml").exists():
-    repo_root = repo_root.parent
+# Scripts start from their own location; notebooks start from the working directory.
+start_path = Path(__file__).resolve().parent if "__file__" in globals() else Path.cwd().resolve()
+for repo_root in (start_path, *start_path.parents):
+    # The nested analysis project also has a pyproject.toml; require the repo layout.
+    if (
+        (repo_root / "pyproject.toml").is_file()
+        and (repo_root / "analysis").is_dir()
+    ):
+        break
+else:
+    raise FileNotFoundError(f"Could not locate the PRISM repository root from {start_path}")
 
 data_path = repo_root / "data"
 if not data_path.exists():
@@ -178,3 +184,4 @@ observed_response.head()
 
 
 observed_response.to_parquet(out_file, index=False)
+

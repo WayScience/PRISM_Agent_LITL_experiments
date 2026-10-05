@@ -21,17 +21,25 @@ import pandas as pd
 # In[2]:
 
 
-repo_root = Path.cwd().resolve()
-while repo_root != repo_root.parent and not (repo_root / "pyproject.toml").exists():
-    repo_root = repo_root.parent
+# Scripts start from their own location; notebooks start from the working directory.
+start_path = Path(__file__).resolve().parent if "__file__" in globals() else Path.cwd().resolve()
+for repo_root in (start_path, *start_path.parents):
+    # The nested analysis project also has a pyproject.toml; require the repo layout.
+    if (
+        (repo_root / "pyproject.toml").is_file()
+        and (repo_root / "analysis").is_dir()
+    ):
+        break
+else:
+    raise FileNotFoundError(f"Could not locate the PRISM repository root from {start_path}")
 
 data_path = repo_root / "data"
 data_path.mkdir(parents=True, exist_ok=True)
 
 secondary_lfc_url = "https://ndownloader.figshare.com/files/20237757"
 secondary_trt_info_url = "https://ndownloader.figshare.com/files/20237763"
-
 model_url = "https://depmap.org/portal/data_page/?tab=allData&releasename=DepMap%20Public%2026Q1&filename=Model.csv"
+
 download_targets = {
     "secondary-screen-replicate-collapsed-logfold-change.csv": secondary_lfc_url,
     "secondary-screen-replicate-collapsed-treatment-info.csv": secondary_trt_info_url,
@@ -129,3 +137,4 @@ for fname in download_targets:
         print(f"[OK] {fname}: preview shape {preview.shape}")
     except Exception as e:
         print(f"[WARN] {fname}: failed CSV parse -> {e}")
+
