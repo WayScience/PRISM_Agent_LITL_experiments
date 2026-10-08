@@ -42,10 +42,6 @@ def _extract_first_cid(search_text: str) -> Optional[str]:
             if candidate.isdigit():
                 return candidate
 
-    # Another fallback: any standalone integer token
-    for tok in re.findall(r"\b\d+\b", search_text):
-        return tok
-
     return None
 
 
