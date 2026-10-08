@@ -29,6 +29,8 @@ dependencies = [
   "pubchempy",
   "rdkit",
   "cellosaurus_mcp",
+  "sentence_transformers",
+  "pymc",
 ]
 
 [project.optional-dependencies]
@@ -65,5 +67,6 @@ markers = [
     "asyncio: async test using asyncio",
 ]
 filterwarnings = [
-    "ignore::DeprecationWarning"
+    "ignore::DeprecationWarning",
+    "ignore:pkg_resources is deprecated as an API:UserWarning:chembl_webresource_client"
 ]
