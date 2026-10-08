@@ -8,5 +8,5 @@
   - [ ] Additional data downloading/wrangling on the fly (for augmenting existing data/acquiring pre-clinical/clinical labels)
 - [ ] Implement machine learning models for adaptive screens
   - [ ] Implement randomized tree regressor predictive of viability reduction from chemcial fingerprint
-  - [ ] Implement bayesian dose response model predictive of vaibility reduction and uncertainty from just screen outcomes
+  - [x] Implement bayesian dose response model predictive of vaibility reduction and uncertainty from just screen outcomes
   - [ ] Refactor agentic models to serve as additional base lines
