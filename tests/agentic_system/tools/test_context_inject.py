@@ -26,9 +26,16 @@ def test_chembl_wrapper_keeps_compatible_signature(monkeypatch, cell_line):
         ("Found compound aspirin with CID 2244 for aspirin.", "2244"),
         ("Found compound with cid 2244.", "2244"),
         ("Found 2 compound(s): CIDs \n - 2244\n - 123", "2244"),
+        ("Found compound 'name with CID 123' with CID 2244 for aspirin.", "2244"),
+        ("Found 2 compound(s) matching 'drug CID 999': CIDs \n - 2244\n - 123", "2244"),
         ("Error searching for 'aspirin': HTTP 503", None),
+        ("Error searching for compound 'CID 2244': HTTP 503\n - 123", None),
         ("No compounds found for 'drug 123'.", None),
         ("Found 0 compound(s).", None),
+        ("- 2244\n - 123", None),
+        ("Found compound with CID invalid for drug with CID 2244.", None),
+        ("Found compound with CID 0 for drug with CID 2244.", None),
+        ("Found 2 compound(s): CIDs\n - 2244\nHTTP 503", None),
         ("", None),
     ],
 )
@@ -36,19 +43,67 @@ def test_pubchem_cid_extraction(text, expected):
     assert pubchem._extract_first_cid(text) == expected
 
 
-def test_pubchem_error_skips_downstream_lookups(monkeypatch):
-    monkeypatch.setattr(
-        pubchem, "search_pubchem_cid", lambda *a, **kw: "HTTP 503 for drug 123"
+@pytest.fixture(params=["builder", "injector"])
+def context_builder(request):
+    if request.param == "builder":
+        return pubchem.build_pubchem_context
+
+    def build(*, query, **kwargs):
+        return pubchem.PubChemContextInjector(**kwargs)(query=query)
+
+    return build
+
+
+@pytest.mark.parametrize(
+    "search_text",
+    [
+        "HTTP 503 for drug 123",
+        "Error searching for compound 'CID 2244': HTTP 503\n - 123",
+        "No compounds found for query 'drug 123'.",
+        "",
+    ],
+)
+def test_pubchem_error_skips_downstream_lookups(context_builder, search_text):
+    calls = []
+
+    class FailedSearchTools:
+        def search_pubchem_cid(self, query, limit=5):
+            calls.append((query, limit))
+            return search_text
+
+        def __getattr__(self, name):
+            pytest.fail(f"Unresolved CIDs must not trigger lookup: {name}")
+
+    context = context_builder(
+        query="  drug 123  ", tools=FailedSearchTools(), cid_limit=3, include_similar=True
     )
 
-    def unexpected_lookup(*args, **kwargs):
-        pytest.fail("Unresolved CIDs must not trigger downstream lookups")
+    assert calls == [("drug 123", 3)]
+    assert f"Call tool `search_pubchem_cid`:\n{search_text}\n" in context
+    assert "No PubChem CID could be resolved" in context
+    assert "Selected primary PubChem CID" not in context
 
-    for name in (
+
+def test_pubchem_injected_tools_receive_arguments(context_builder):
+    tools = create_autospec(pubchem.for_agents, spec_set=True)
+    tools.search_pubchem_cid.return_value = "Found compound with CID 2244."
+    downstream = (
         "get_properties", "get_assay_summary", "get_safety_summary",
         "get_drug_summary", "find_similar_compounds",
-    ):
-        monkeypatch.setattr(pubchem, name, unexpected_lookup)
+    )
+    for name in downstream:
+        getattr(tools, name).return_value = f"Result from {name}"
 
-    context = pubchem.build_pubchem_context(query="drug 123", include_similar=True)
-    assert "No PubChem CID could be resolved" in context
+    context = context_builder(
+        query="aspirin", tools=tools, cid_limit=3, assay_limit=2,
+        include_similar=True, similar_threshold=85, similar_limit=4,
+    )
+
+    tools.search_pubchem_cid.assert_called_once_with("aspirin", limit=3)
+    tools.get_properties.assert_called_once_with("2244")
+    tools.get_assay_summary.assert_called_once_with("2244", limit=2)
+    tools.get_safety_summary.assert_called_once_with("2244")
+    tools.get_drug_summary.assert_called_once_with("2244")
+    tools.find_similar_compounds.assert_called_once_with("2244", threshold=85, limit=4)
+    for name in downstream:
+        assert f"Result from {name}" in context
