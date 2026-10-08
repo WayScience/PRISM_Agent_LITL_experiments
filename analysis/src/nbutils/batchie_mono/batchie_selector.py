@@ -7,7 +7,7 @@ from abc import ABC, abstractmethod
 import numpy as np
 import pandas as pd
 
-from .batchie_config import COMPOUND_COLUMN, RESPONSE_COLUMN, RESPONSE_KEY_COLUMNS
+from .batchie_config import COMPOUND_COLUMN
 from .models import ResponseModel
 
 
