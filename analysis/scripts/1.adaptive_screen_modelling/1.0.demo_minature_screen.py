@@ -166,7 +166,7 @@ metrics.groupby(["selector", "background_cells"]).tail(1)
 # Retrieves close to all top 10% killing compounds after seeing just 96 drugs (less than half) compared to random only retrieving 30%.
 # 
 # This is a sanity check demo that the minimal BATCHIE adaptation and implemenation works, to fully indicate superiority and utility we will need to place BATCHIE under stricter conditions like only seeing partial ground truth within each background cell lines and generalizing across tissue and cancer types. 
-# Also the bayesian sampling hyper-parameters needed to be tuned to ensure convergence (see outputs from PyMC and NUTS from cell 7 complaining that sampling is not sufficiently extensive).    
+# Also the bayesian sampling hyper-parameters needed to be tuned to ensure convergence (see outputs from PyMC and NUTS from cell 4 complaining that sampling is not sufficiently extensive).    
 
 # In[5]:
 
@@ -194,4 +194,3 @@ ax.grid(alpha=0.25)
 ax.legend()
 fig.tight_layout()
 plt.show()
-
