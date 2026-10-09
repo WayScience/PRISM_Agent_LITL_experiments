@@ -20,7 +20,8 @@ Here:
 - \($U_i$\) and \($V_j$\) are learned vectors whose dot product captures cell-line-specific drug responses.
 - \($\tau$\) is the observation-noise precision (inverse of variance).
 
-Fitting this model by maximum likelihood estimation (MLE) would be straightforward to implement: with a shared noise variance, estimating the response parameters amounts to minimizing squared prediction errors over observed treatments. A standard optimizer could learn the offsets and embeddings, yielding one fitted parameter set and a point prediction for each unmeasured response.
+Fitting this model by maximum likelihood estimation (MLE) would be straightforward to implement: with a shared noise variance, estimating the response parameters amounts to minimizing squared prediction errors over observed treatments. 
+A standard optimizer could learn the offsets and embeddings, yielding one fitted parameter set and a point prediction for each unmeasured response.
 
 ## Why Bayesian inference?
 
@@ -39,7 +40,8 @@ $$
 where \($\theta$\) denotes the model parameters. 
 
 Rather than retaining only one fitted parameter set, we want to approximate the posterior distribution of parameter values compatible with the data. 
-Propagating these values through the response model gives a distribution of plausible expected responses for each unmeasured treatment. Adding observation noise gives a predictive distribution for a future measurement.
+Propagating these values through the response model gives a distribution of plausible expected responses for each unmeasured treatment. 
+Adding observation noise gives a predictive distribution for a future measurement.
 
 ## Where the implementation complexity comes from
 
