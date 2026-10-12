@@ -1,10 +1,13 @@
-name: pre-commit
+name: analysis-tests
 
 on:
   push:
     branches:
-      - "batchie-pymc-adapt"
+      - batchie-pymc-adapt
   pull_request:
+    branches:
+      - main
+  workflow_dispatch:
 
 permissions:
   contents: read
