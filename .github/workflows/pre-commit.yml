@@ -3,7 +3,7 @@ name: pre-commit
 on:
   push:
     branches:
-      - "wli51:batchie-pymc-adapt"
+      - "batchie-pymc-adapt"
   pull_request:
 
 permissions:
