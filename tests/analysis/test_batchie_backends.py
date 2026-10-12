@@ -1,6 +1,5 @@
 """Shared model/selection contracts; short chains test mechanics, not convergence."""
 
-from dataclasses import fields
 
 import numpy as np
 import pandas as pd
@@ -8,6 +7,8 @@ import pytest
 
 from nbutils.batchie_mono.batchie import BayesianFixedDoseModel
 from nbutils.batchie_mono.batchie_selector import PredictedLowestSelector, RandomSelector
+from nbutils.batchie_mono import model_utils
+from nbutils.batchie_mono.models import BayesianResponseModel
 from nbutils.batchie_mono.simulation import run_simulation
 
 
@@ -126,3 +127,66 @@ def test_adaptive_simulation(backend, selector_class, data):
             remaining = sorted(set(remaining) - set(chosen))
             expected.append(len(seen & hits))
         assert result.top_hits_found.tolist() == expected
+
+
+def test_model_utils_numerical_contracts():
+    grouped = model_utils._group_row_indices(np.array([2, 0, 2]), group_count=4)
+    assert [indices.tolist() for indices in grouped] == [[1], [], [0, 2], []]
+
+    design = np.array([[1.0, 0.0], [1.0, 1.0], [1.0, 2.0]])
+    target = np.array([1.0, 2.0, 2.0])
+    penalty = 2.0
+    expected_regularizer = np.diag([penalty * 0.1, penalty])
+    expected = np.linalg.solve(
+        design.T @ design + expected_regularizer,
+        design.T @ target,
+    )
+    np.testing.assert_allclose(model_utils._ridge_solve(design, target, penalty), expected)
+
+    means = model_utils._factor_mean(
+        global_offset=1.0,
+        cell_offsets=np.array([0.1, 0.2]),
+        compound_offsets=np.array([-0.2, 0.3]),
+        cell_embeddings=np.array([[1.0, 2.0], [3.0, 4.0]]),
+        compound_embeddings=np.array([[0.5, 1.0], [2.0, -1.0]]),
+        model_ids=np.array([0, 1, 0]),
+        compound_ids=np.array([1, 0, 0]),
+    )
+    np.testing.assert_allclose(means, [1.4, 6.5, 3.4])
+
+    precision = np.diag([2.0, 4.0])
+    mean_part = np.array([2.0, 8.0])
+    rng = np.random.default_rng(27)
+    reference_rng = np.random.default_rng(27)
+    expected_draw = np.array([1.0, 2.0]) + np.linalg.solve(
+        np.linalg.cholesky(precision).T,
+        reference_rng.normal(size=2),
+    )
+    np.testing.assert_allclose(
+        model_utils._sample_from_precision(precision, mean_part, rng), expected_draw,
+    )
+
+
+def test_abstract_response_model_methods_raise_not_implemented():
+    class MethodProbe(BayesianResponseModel):
+        def fit(self, observed_data):
+            return super().fit(observed_data)
+
+        def predict(self, candidate_pairs):
+            return super().predict(candidate_pairs)
+
+        def posterior_draws(self, candidate_pairs):
+            return super().posterior_draws(candidate_pairs)
+
+        def observation_variance_draws(self):
+            return super().observation_variance_draws()
+
+    model = MethodProbe()
+    with pytest.raises(NotImplementedError):
+        model.fit(pd.DataFrame())
+    with pytest.raises(NotImplementedError):
+        model.predict(pd.DataFrame())
+    with pytest.raises(NotImplementedError):
+        model.posterior_draws(pd.DataFrame())
+    with pytest.raises(NotImplementedError):
+        model.observation_variance_draws()
