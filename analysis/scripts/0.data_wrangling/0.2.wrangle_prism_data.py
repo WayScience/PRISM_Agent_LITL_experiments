@@ -63,16 +63,16 @@ out_file = data_path / "secondary-screen-observed-response-long.parquet"
 # The transformation below follows these steps:
 # 
 # 1. Reshape the response matrix from wide to long format, producing one record per model and encoded treatment.
-# 2. Exclude rows whose model identifier contains `FAILED` and remove records with missing log-fold-change values.
-# 3. Join treatment annotations by the exact encoded treatment key, then enrich records with model metadata by `ModelID`. Both joins are checked as many-to-one; unmatched treatment rows are reported.
+# 2. Exclude rows whose model identifier contains `FAILED`, remove records with missing log-fold-change values, and normalize the `PR<number>_` prefix (for example, `PR500_ACH-000007` becomes `ACH-000007`) to match `Model.csv` identifiers.
+# 3. Join treatment annotations by the exact encoded treatment key, then enrich records with model metadata by normalized `ModelID`. Both joins are checked as many-to-one; unmatched treatment rows and model IDs are reported.
 # 4. Normalize the treatment plate label and collapse duplicate treatment rows by encoded treatment key. In this release, duplicate rows differ only by the `PR300`/`PR500` plate suffix, which is not encoded in the response matrix.
 # 5. Average repeated measurements only within the same `ModelID`, compound (`broad_id`), dose, and screen. Missing grouping values are retained during aggregation.
 # 6. For identified model–compound–dose experiments, retain the highest-reliability screen (`MTS010 > MTS006 > MTS005 > HTS002`). Unranked/missing screens rank below the named screens; ties are retained. Rows with missing model, compound, or dose keys are retained because their experiment identity cannot be safely compared. See [here](https://forum.depmap.org/t/question-about-duplicated-measures-in-prism-mts010-screen-auc-data/83?utm_source=chatgpt.com) for details.
 # 7. Convert dose values to numeric where possible and sort the resulting table for easier inspection.
 # 
-# Missing/unparseable dose values and unmatched treatment metadata are retained.
+# Missing/unparseable dose values and unmatched treatment or model metadata are retained.
 
-# In[ ]:
+# In[3]:
 
 
 # Build one observed response per cell line x compound x dose from replicate-collapsed matrix.
@@ -87,6 +87,10 @@ obs_long = lfc_df.rename(columns={cell_id_col: "ModelID"}).melt(
 # Remove known failed profiles and missing responses.
 obs_long = obs_long[~obs_long["ModelID"].astype(str).str.contains("FAILED", na=False)].copy()
 obs_long = obs_long.dropna(subset=["logfold_change"])
+# The LFC matrix uses IDs such as `PR500_ACH-000007`; Model.csv uses `ACH-000007`.
+obs_long["ModelID"] = obs_long["ModelID"].astype("string").str.replace(
+    r"^PR\d+_", "", regex=True
+)
 
 # 2) Collapse PR300/PR500 plate variants not encoded in the response matrix.
 treatment_annotations = trt_df.assign(
@@ -119,6 +123,16 @@ model_cols = [
     "ModelType",
 ]
 model_info = model_df[model_cols].drop_duplicates(subset=["ModelID"])
+
+unmatched_model_ids = (
+    set(obs_with_treatment["ModelID"].dropna().unique())
+    - set(model_info["ModelID"].dropna().unique())
+)
+if unmatched_model_ids:
+    print(
+        f"Warning: {len(unmatched_model_ids)} model IDs have no Model.csv match; "
+        f"examples: {sorted(unmatched_model_ids)[:5]}"
+    )
 
 observed_response = obs_with_treatment.merge(
     model_info,
@@ -210,7 +224,7 @@ print("Unique model x compound x dose x screen keys:", observed_response[key_col
 # 
 # The preview below shows the first few sorted records. Check that the response, dose, compound, screen, and model-identification columns look plausible before saving.
 
-# In[ ]:
+# In[4]:
 
 
 observed_response.head()
@@ -220,8 +234,7 @@ observed_response.head()
 # 
 # The final cell writes the complete `observed_response` table—not just the displayed preview—to the path defined in the setup cell. The output is saved without a pandas index and can be loaded later with `pandas.read_parquet`. Running the save cell again overwrites the existing output file.
 
-# In[ ]:
+# In[5]:
 
 
 observed_response.to_parquet(out_file, index=False)
-

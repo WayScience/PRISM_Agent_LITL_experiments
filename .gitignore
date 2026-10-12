@@ -1,5 +1,12 @@
 # Big preprocessing output
-/data/processed/processed_depmap_prism_ic50.csv
+/data/processed/**/*.csv
+**/log/demo/*
+*.csv
+*.jsonl
+*.json
+modal/**
+agentic_system/**
+data/lm_question_sets/**
 
 # Configuration file for experiments
 config.yml

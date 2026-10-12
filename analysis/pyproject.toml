@@ -5,6 +5,9 @@ description = "Notebook-only utilities for this repo"
 requires-python = ">=3.9"
 authors = [{ name = "Weishan Li" }]
 
+[project.optional-dependencies]
+pymc = ["pymc>=5.10,<6"]
+
 [build-system]
 requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
