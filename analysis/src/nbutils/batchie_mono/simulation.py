@@ -6,9 +6,13 @@ BATCHIE simulation orchestration module.
 import numpy as np
 import pandas as pd
 
-from .batchie_config import COMPOUND_COLUMN, RESPONSE_COLUMN, RESPONSE_KEY_COLUMNS
-from .models import ResponseModel
-from .batchie_selector import BatchSelector
+from nbutils.batchie_mono.batchie_config import (
+    COMPOUND_COLUMN,
+    RESPONSE_COLUMN,
+    RESPONSE_KEY_COLUMNS,
+)
+from nbutils.batchie_mono.models import ResponseModel
+from nbutils.batchie_mono.batchie_selector import BatchSelector
 
 
 def run_simulation(

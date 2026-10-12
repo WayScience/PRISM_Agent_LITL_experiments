@@ -11,10 +11,10 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pymc as pm
 
-from .posterior import Posterior
+from nbutils.batchie_mono.posterior import Posterior
 
 if TYPE_CHECKING:
-    from .batchie import BayesianFixedDoseModel
+    from nbutils.batchie_mono.batchie import BayesianFixedDoseModel
 
 
 def sample_posterior(responses: np.ndarray, model_ids: np.ndarray,

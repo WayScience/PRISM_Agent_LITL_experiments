@@ -7,9 +7,14 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from .batchie_config import CONDITION_COLUMNS, DOSE_COLUMN, MODEL_COLUMN, RESPONSE_COLUMN
-from .models import BayesianResponseModel
-from .posterior import Posterior
+from nbutils.batchie_mono.batchie_config import (
+    CONDITION_COLUMNS,
+    DOSE_COLUMN,
+    MODEL_COLUMN,
+    RESPONSE_COLUMN,
+)
+from nbutils.batchie_mono.models import BayesianResponseModel
+from nbutils.batchie_mono.posterior import Posterior
 
 __all__ = ["BayesianFixedDoseModel", "Posterior"]
 
@@ -124,14 +129,14 @@ class BayesianFixedDoseModel(BayesianResponseModel):
         self._is_fitted = False
         self.inference_data_ = None
         if self.backend == "pymc":
-            from .pymc_backend import sample_posterior as sample_pymc
+            from nbutils.batchie_mono.pymc_backend import sample_posterior as sample_pymc
 
             self.posterior_, self.inference_data_ = sample_pymc(
                 responses, model_ids, compound_ids, self
             )
         else:
-            from .gibbs import sample_posterior
-            from .model_utils import _group_row_indices
+            from nbutils.batchie_mono.gibbs import sample_posterior
+            from nbutils.batchie_mono.model_utils import _group_row_indices
 
             self.posterior_ = sample_posterior(
                 responses, model_ids, compound_ids,

@@ -7,8 +7,8 @@ from abc import ABC, abstractmethod
 import numpy as np
 import pandas as pd
 
-from .batchie_config import COMPOUND_COLUMN
-from .models import ResponseModel
+from nbutils.batchie_mono.batchie_config import COMPOUND_COLUMN
+from nbutils.batchie_mono.models import ResponseModel
 
 
 class BatchSelector(ABC):

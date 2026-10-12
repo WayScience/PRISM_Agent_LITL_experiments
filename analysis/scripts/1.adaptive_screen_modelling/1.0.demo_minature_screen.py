@@ -11,6 +11,9 @@
 # - Hidden target responses are used only for revealing selected compounds and retrospective scoring. Background responses plus the initial 16 target responses train the first model; this is not a fit from only 16 total measurements.
 # 
 # **Retrieval metric:** fraction of the pool's lowest-LFC $\lceil 0.1N\rceil$ compounds discovered, including the initial 16. Ties are broken by compound ID. The hit set is fixed across runs and defined within this miniature pool, not all PRISM compounds. The x-axis counts target measurements only; historical background is excluded.
+# 
+# ## Note
+# This is a sanity check demo that the minimal BATCHIE adaptation and implemenation works, to fully indicate superiority and utility we will need to place BATCHIE under stricter conditions like only seeing partial ground truth within each background cell lines and generalizing across tissue and cancer types. 
 
 # In[1]:
 
@@ -118,6 +121,8 @@ print(f"Shared initial observations: {initial_size} | acquisition: {iterations} 
 
 
 # ## Fitting BATCHIE + eval on target every iteration
+# 
+# Warnings complaining that sampling is not sufficiently extensive is expected here because we haven't finetuned the sampling process yet, causing the Gibbs sampler to not fully converge to mimic the true joint distribution. 
 
 # In[4]:
 
@@ -164,9 +169,6 @@ metrics.groupby(["selector", "background_cells"]).tail(1)
 # After being "trained" on 2, 6, or 10 background lines, BATCHIE demostrates far better than chance selectivity of lowest LFC (strongest killing effect) compounds on unseen cell lines.
 # 
 # Retrieves close to all top 10% killing compounds after seeing just 96 drugs (less than half) compared to random only retrieving 30%.
-# 
-# This is a sanity check demo that the minimal BATCHIE adaptation and implemenation works, to fully indicate superiority and utility we will need to place BATCHIE under stricter conditions like only seeing partial ground truth within each background cell lines and generalizing across tissue and cancer types. 
-# Also the bayesian sampling hyper-parameters needed to be tuned to ensure convergence (see outputs from PyMC and NUTS from cell 4 complaining that sampling is not sufficiently extensive).    
 
 # In[5]:
 
