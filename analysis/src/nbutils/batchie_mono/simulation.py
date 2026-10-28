@@ -2,7 +2,6 @@
 BATCHIE simulation orchestration module. 
 """
 
-
 import numpy as np
 import pandas as pd
 
@@ -25,7 +24,8 @@ def run_simulation(
     batch_size: int = 8,
     iterations: int = 10,
 ) -> pd.DataFrame:
-    """Fit, choose a batch, reveal its target responses, and repeat.
+    """
+    Fit, choose a batch, reveal its target responses, and repeat.
 
     Inputs are prefiltered to one dose and unique response keys. Background
     excludes the target cell line and covers every candidate compound. Target
@@ -37,6 +37,15 @@ def run_simulation(
     iteration zero. Hits are the lowest ceil(10% * pool size) target LFCs,
     breaking ties by compound ID. The denominator is fixed across all rounds.
     Each fit starts afresh; there is no extra fit after the final reveal.
+
+    :param background: DataFrame containing background response observations.
+    :param target_responses: DataFrame containing target observations (prediction targets).
+    :param initial_compounds: List of initial compound IDs revealed to the model outright.
+    :param model: ResponseModel instance used for fitting.
+    :param selector: BatchSelector instance used for selecting batches.
+    :param batch_size: Number of compounds to select in each batch.
+    :param iterations: Number of iterations to run the simulation.
+    :return: DataFrame containing retrieval metrics for each iteration.
     """
     observed_target = target_responses[
         target_responses[COMPOUND_COLUMN].isin(initial_compounds)

@@ -3,19 +3,21 @@ Defines the posterior distribution data structure (descriptive of a model given 
 Contracts the data structure of posterior sampler returns.
 """
 
-from dataclasses import dataclass
-
 import numpy as np
+from pydantic import BaseModel, ConfigDict
 
 
-@dataclass(frozen=True)
-class Posterior:
+class Posterior(BaseModel):
     """
     Posterior distribution for a Bayesian, monotherapy, fixed-dose model.
 
     Because we fit S models through sampling S posterior draws to account for modelling uncertainty,
         all parameters have a S dimension.
     """
+
+    # Array shapes, finiteness and precision positivity are checked by validate_trace.
+    # Frozen prevents field reassignment, not in-place mutation of array contents.
+    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True, extra="forbid")
 
     # screen native scalar offset, learned per posterior draw (model fit)
     global_offset: np.ndarray 
@@ -34,3 +36,17 @@ class Posterior:
 
     # observation precision, learned per posterior draw (model fit)
     observation_precision: np.ndarray  # shape (S,)
+
+
+def posterior_from_trace(trace):
+    """
+    Flatten an already-retained trace once, using chain-major ordering.
+    """
+
+    arrays = {}
+
+    for name in Posterior.model_fields:
+        values = trace.posterior[name].transpose("chain", "draw", ...).values
+        arrays[name] = values.reshape((-1, *values.shape[2:]))
+
+    return Posterior(**arrays)

@@ -19,17 +19,18 @@
 
 
 from pathlib import Path
+import resource
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from nbutils.batchie_mono.batchie import BayesianFixedDoseModel
 from nbutils.batchie_mono.simulation import run_simulation
-from nbutils.batchie_mono.batchie_selector import (
-    PredictedLowestSelector,
-    RandomSelector,
-)
+from nbutils.batchie_mono.batchie import BayesianFixedDoseModel
+from nbutils.batchie_mono.batchie_selector import PredictedLowestSelector, RandomSelector
+from nbutils.batchie_mono.spec import ModelSpec
+from nbutils.batchie_mono.sampling import NUTSConfig
+from nbutils.batchie_mono.pymc_backend import PyMCSampler
 
 
 # In[2]:
@@ -58,6 +59,29 @@ responses.head()
 # fine for demo purpose nontheless
 # the former experiments will have separate deterministic datasplitting independent of model fitting
 seed = 0
+backend = "pymc"
+model_spec = ModelSpec(
+    rank=4,
+    prior_shape=1.1,
+    prior_rate=1.1,
+    global_precision=0.01,
+)
+
+# Original lightweight defaults, suitable for checking the API migration.
+# These are not a recommendation for reliable posterior inference.
+sampling_config = NUTSConfig(
+    burnin=40,
+    posterior_samples=30,
+    thin=2,
+    chains=1,
+    seed=seed,
+    cores=8,
+    blas_cores=1,
+    target_accept=0.9,
+    max_treedepth=10,
+    parameterization="centered",
+)
+
 rng = np.random.default_rng(seed)
 
 # initial size means the number of compounds initially tested for the target model
@@ -120,20 +144,39 @@ print(f"Shared pool: {len(target_responses)} compounds | backgrounds: {backgroun
 print(f"Shared initial observations: {initial_size} | acquisition: {iterations} × {batch_size}")
 
 
-# ## Fitting BATCHIE + eval on target every iteration
+# ## Fit PyMC NUTS and evaluate each acquisition round
 # 
-# Warnings complaining that sampling is not sufficiently extensive is expected here because we haven't finetuned the sampling process yet, causing the Gibbs sampler to not fully converge to mimic the true joint distribution. 
+# Use four independent chains, **100 tuning steps and 200 post-warmup draws per chain**, with `thin=1` so all 200 draws are retained for predictions. Chains run sequentially with one BLAS thread. The Gibbs notebook still uses the previous shorter schedule.
+# 
+# Each fit saves its full post-warmup trace, observed rows, predictions, timing and configuration under `output/demo_sampler_comparison/pymc`, overwriting the earlier PyMC demo artifacts on rerun. There is no extra fit after the final acquisition: fit 10 has 88 target observations, and final retrieval is scored at 96. NUTS warnings are retained, not suppressed.
+# 
+# **Pending rerun:** existing outputs and the results below come from the earlier 40-tune/60-draw schedule, not this updated configuration. Restart the kernel and run all cells. Notebook 1.2 currently asserts equal sampler configurations and 60 draws per chain; it will need updating before comparing the new PyMC artifacts against the previous Gibbs run.
 
 # In[4]:
 
 
+# Persist each fitted posterior without changing run_simulation or either selector.
+def cpu_seconds():
+    return sum(getattr(resource.getrusage(who), name)
+               for who in (resource.RUSAGE_SELF, resource.RUSAGE_CHILDREN)
+               for name in ("ru_utime", "ru_stime"))
+
+def make_model():
+    """Create an independent model for one simulation trajectory."""
+    return BayesianFixedDoseModel(
+        spec=model_spec,
+        sampler=PyMCSampler(config=sampling_config),
+        prediction_seed=seed,
+    )
+
 runs = []
+
 for count in background_counts:
     result = run_simulation(
         background=backgrounds[count],
         target_responses=target_responses,
         initial_compounds=initial_compounds,
-        model=BayesianFixedDoseModel(seed=seed),
+        model=make_model(),
         selector=PredictedLowestSelector(),
         batch_size=batch_size,
         iterations=iterations,
@@ -141,21 +184,26 @@ for count in background_counts:
     result["background_cells"] = count
     result["background_measurements"] = len(backgrounds[count])
     runs.append(result)
-    print(f"{count} background lines: retrieved {result.iloc[-1]['top_10pct_retrieval']:.1%} of top hits")
 
-# Random selection ignores predictions so any background will yield the same trajectory 
-# as we are sampling over the deterministic pool of compound names
+    retrieval = result.iloc[-1]["top_10pct_retrieval"]
+    print(f"{count} background lines: retrieved {retrieval:.1%} of top hits")
+
+random_background_count = min(background_counts)
+
 random_baseline = run_simulation(
-    background=backgrounds[2], # hard-coded for random baseline
+    background=backgrounds[random_background_count],
     target_responses=target_responses,
     initial_compounds=initial_compounds,
-    model=BayesianFixedDoseModel(seed=seed),
+    model=make_model(),
     selector=RandomSelector(seed=seed),
     batch_size=batch_size,
     iterations=iterations,
 )
-random_baseline["background_cells"] = 2
-random_baseline["background_measurements"] = len(backgrounds[2])
+random_baseline["background_cells"] = random_background_count
+random_baseline["background_measurements"] = len(
+    backgrounds[random_background_count]
+)
+
 metrics = pd.concat([*runs, random_baseline], ignore_index=True)
 metrics.groupby(["selector", "background_cells"]).tail(1)
 
@@ -163,12 +211,6 @@ metrics.groupby(["selector", "background_cells"]).tail(1)
 # ## Minimal sanity check results visualization
 
 # The plot uses circles (2), squares (6), and triangles (10) for background size, and crosses for random acquisition. Differences reflect added background information for this particular nested set, not a general guarantee about the number of cell lines needed.
-
-# As expected, BATCHIE does its job.
-# 
-# After being "trained" on 2, 6, or 10 background lines, BATCHIE demostrates far better than chance selectivity of lowest LFC (strongest killing effect) compounds on unseen cell lines.
-# 
-# Retrieves close to all top 10% killing compounds after seeing just 96 drugs (less than half) compared to random only retrieving 30%.
 
 # In[5]:
 

@@ -7,21 +7,21 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from nbutils.batchie_mono.batchie_config import (
-    CONDITION_COLUMNS,
-    DOSE_COLUMN,
-    MODEL_COLUMN,
-    RESPONSE_COLUMN,
-)
+from nbutils.batchie_mono.batchie_config import RESPONSE_KEY_COLUMNS
 from nbutils.batchie_mono.models import BayesianResponseModel
-from nbutils.batchie_mono.posterior import Posterior
+from nbutils.batchie_mono.posterior import Posterior, posterior_from_trace
+from nbutils.batchie_mono.spec import ModelSpec
+from nbutils.batchie_mono.data import EncodedObservations
+from nbutils.batchie_mono.sampling import PosteriorSampler
+from nbutils.batchie_mono.trace import validate_trace
+
 
 __all__ = ["BayesianFixedDoseModel", "Posterior"]
 
 
 class BayesianFixedDoseModel(BayesianResponseModel):
     """
-    Fixed-dose Gaussian factorization with PyMC NUTS sampling.
+    Fixed-dose Gaussian factorization with PyMC NUTS or blocked Gibbs sampling.
     Adapted from BATCHIE (Tosh et al., 2025, 10.1038/s41467-024-55287-7) for monotherapy screens.
 
     Fits observed log2-fold-changes in a viability screen as:
@@ -34,115 +34,57 @@ class BayesianFixedDoseModel(BayesianResponseModel):
         added on top of the scalar a[k] and b[i] effects to model similarly
         "natured" interactions between the same compound and different models and vice versa.
 
-    Class parameters are primarily hyperparameters that control rank (model complexity), 
-        the MCMC sampling schedule, and priors on what the
-        distributions for model parameters should be. 
+    This class owns just the factorization vocabulary and API facing the selector,
+        to propose next screen experiments based on current state of model. 
     """
 
     def __init__(
         self,
         *,
-        rank: int = 4,
-        burnin: int = 40,
-        posterior_samples: int = 30,
-        thin: int = 2,
-        prior_shape: float = 1.1,
-        prior_rate: float = 1.1,
-        global_precision: float = 0.01,
-        seed: int = 0,
-        backend: str = "pymc",
-        chains: int = 1,
-        target_accept: float = 0.9,
+        sampler: PosteriorSampler,
+        spec: ModelSpec = ModelSpec(),
+        prediction_seed: int = 0,
     ) -> None:
         """
-        Initialize the BayesianFixedDoseModel with the specified hyperparameters.
+        Initialize the BayesianFixedDoseModel
 
-        :param rank: Dimensionality of the low-rank interaction embeddings.
-        :param burnin: Gibbs burn-in sweeps or PyMC NUTS tuning steps.
-        :param posterior_samples: Retained draws per chain after burn-in and thinning.
-        :param thin: Thinning interval for posterior samples.
-        :param prior_shape: Shape parameter for the Gamma prior on precision terms.
-        :param prior_rate: Rate parameter for the Gamma prior on precision terms.
-        :param global_precision: Precision of the global intercept prior.
-        :param seed: Random seed for reproducibility.
-        :param backend: "pymc" (default, NUTS) or "gibbs" (not implemented yet).
-        :param chains: Number of PyMC chains, run sequentially; Gibbs requires one.
-        :param target_accept: PyMC NUTS target acceptance probability.
+        :param sampler: Posterior sampler instance for generating posterior draws.
+        :param spec: Model specification containing hyperparameters and settings.
+        :param prediction_seed: Random seed for prediction reproducibility.
         """
-        values = [rank, burnin, posterior_samples, thin, prior_shape, prior_rate, global_precision]
-        if any(value <= 0 for value in values):
-            raise ValueError("All model hyperparameters must be positive")
-        if backend not in {"gibbs", "pymc"}:
-            raise ValueError("backend must be 'gibbs' or 'pymc'")
-        if not isinstance(chains, int) or chains < 1 or (backend == "gibbs" and chains != 1):
-            raise ValueError("chains must be positive; the Gibbs backend requires chains=1")
-        if backend == "gibbs":
-            raise NotImplementedError("Gibbs backend is not implemented yet")
-        if not 0 < target_accept < 1:
-            raise ValueError("target_accept must be between zero and one")
         
-        self.rank = rank
-        self.burnin = burnin
-        self.posterior_samples = posterior_samples
-        self.thin = thin
-        self.prior_shape = prior_shape
-        self.prior_rate = prior_rate
-        self.global_precision = global_precision
-        self.seed = seed
-        self.backend = backend
-        self.chains = chains
-        self.target_accept = target_accept
-        self.inference_data_ = None
-        self._is_fitted = False
+        self.sampler = sampler
+        self.spec = spec
+        self.prediction_seed = prediction_seed
+        self.clear_fit()
 
-    def fit(self, observed_data: pd.DataFrame) -> "BayesianFixedDoseModel":
-        """Fit unique, nonmissing response keys at exactly one dose.
-
-        Extra metadata are ignored; responses are not normalized. Sorted IDs
-        define posterior axes. Repeated screens must be aggregated upstream.
-        Returns self with a fresh posterior_ and identifier mappings."""
-        required = [MODEL_COLUMN, *CONDITION_COLUMNS, RESPONSE_COLUMN]
-        missing_columns = sorted(set(required).difference(observed_data.columns))
-        if missing_columns:
-            raise ValueError(f"Observed data are missing columns: {missing_columns}")
-        if observed_data[required].isna().any().any():
-            raise ValueError("Observed data contain missing model, compound, dose, or response")
-        if observed_data[DOSE_COLUMN].nunique() != 1:
-            raise ValueError("BayesianFixedDoseModel requires exactly one fixed dose")
-        if observed_data.duplicated([MODEL_COLUMN, *CONDITION_COLUMNS]).any():
-            raise ValueError("Observed data contain duplicate response keys")
-
-        # models refers to the disease-models (cell-lines)
-        models = np.sort(observed_data[MODEL_COLUMN].unique())
-        compounds = np.sort(observed_data["broad_id"].unique())
-        model_index = {model: index for index, model in enumerate(models)}
-        compound_index = {compound: index for index, compound in enumerate(compounds)}
-        model_ids = observed_data[MODEL_COLUMN].map(model_index).to_numpy(dtype=int)
-        compound_ids = observed_data["broad_id"].map(compound_index).to_numpy(dtype=int)
-        responses = observed_data[RESPONSE_COLUMN].to_numpy(dtype=float)
-
-        self.models_ = models
-        self.compounds_ = compounds
-        self.fixed_dose_ = float(observed_data[DOSE_COLUMN].iloc[0])
-        self.model_index_ = model_index
-        self.compound_index_ = compound_index
+    def clear_fit(self):
+        """Clear the current fit, resetting all model attributes."""
         self._is_fitted = False
         self.inference_data_ = None
-        if self.backend == "pymc":
-            from nbutils.batchie_mono.pymc_backend import sample_posterior as sample_pymc
+        self.posterior_ = None
+        self.training_data_ = None
+        self.models_ = self.compounds_ = self.fixed_dose_ = None
+        self.model_index_ = self.compound_index_ = None
 
-            self.posterior_, self.inference_data_ = sample_pymc(
-                responses, model_ids, compound_ids, self
-            )
-        else:
-            from nbutils.batchie_mono.gibbs import sample_posterior
-            from nbutils.batchie_mono.model_utils import _group_row_indices
+    def fit(self, observed_data: pd.DataFrame) -> BayesianFixedDoseModel:
+        """
+        Fresh fit at one dose; a failed refit cannot expose an old posterior.
+        """
+        self.clear_fit()
+        
+        data = EncodedObservations.from_frame(observed_data)
+        result = self.sampler.sample(data, self.spec)
+        validate_trace(result.trace, data, self.spec)
+        posterior = posterior_from_trace(result.trace)
 
-            self.posterior_ = sample_posterior(
-                responses, model_ids, compound_ids,
-                _group_row_indices(model_ids, len(models)),
-                _group_row_indices(compound_ids, len(compounds)), self,
-            )
+        self.training_data_ = data
+        self.inference_data_ = result.trace
+        self.posterior_ = posterior
+        self.models_, self.compounds_ = data.models, data.compounds
+        self.fixed_dose_ = data.fixed_dose
+        self.model_index_ = dict(zip(data.models, range(len(data.models))))
+        self.compound_index_ = dict(zip(data.compounds, range(len(data.compounds))))
         self._is_fitted = True
         return self
 
@@ -156,21 +98,11 @@ class BayesianFixedDoseModel(BayesianResponseModel):
         """
         if not self._is_fitted:
             raise RuntimeError("Call fit before requesting posterior draws")
-        required = [MODEL_COLUMN, "broad_id", DOSE_COLUMN]
-        missing_columns = sorted(set(required).difference(candidate_pairs.columns))
-        if missing_columns:
-            raise ValueError(f"Candidate pairs are missing columns: {missing_columns}")
-        if not np.allclose(candidate_pairs[DOSE_COLUMN], self.fixed_dose_):
-            raise ValueError("Candidate pairs must use the model's fixed dose")
-        try:
-            model_ids = np.array([self.model_index_[value] for value in candidate_pairs[MODEL_COLUMN]])
-            compound_ids = np.array(
-                [self.compound_index_[value] for value in candidate_pairs["broad_id"]]
-            )
-        except KeyError as error:
-            raise KeyError(f"Candidate contains an unseen identifier: {error.args[0]}") from error
+        
+        model_ids, compound_ids = self.training_data_.candidate_indices(candidate_pairs)
 
         posterior = self.posterior_
+
         return (
             posterior.global_offset[:, None] # intercept (ambient)
             + posterior.cell_offsets[:, model_ids] # intercept for each model (cell-line)
@@ -205,15 +137,13 @@ class BayesianFixedDoseModel(BayesianResponseModel):
         :return: DataFrame with predicted mean, posterior SD, predictive SD, and 90% predictive intervals.        
         """
         draws = self.posterior_draws(candidate_pairs)
-        result = candidate_pairs[[MODEL_COLUMN, "broad_id", DOSE_COLUMN]].copy()
+        variance = self.observation_variance_draws()
+        result = candidate_pairs[RESPONSE_KEY_COLUMNS].copy()
         result["predicted_mean"] = draws.mean(axis=0)
         result["posterior_std"] = draws.std(axis=0, ddof=1)
-        result["predictive_std"] = np.sqrt(
-            draws.var(axis=0, ddof=1) + self.observation_variance_draws().mean()
-        )
-        predictive_draws = draws + np.sqrt(self.observation_variance_draws())[:, None] * (
-            np.random.default_rng(self.seed + 1).normal(size=draws.shape)
-        )
+        result["predictive_std"] = np.sqrt(draws.var(axis=0, ddof=1) + variance.mean())
+        noise = np.random.default_rng(self.prediction_seed + 1).normal(size=draws.shape)
+        predictive_draws = draws + np.sqrt(variance)[:, None] * noise
         result["interval_lower"] = np.quantile(predictive_draws, 0.05, axis=0)
         result["interval_upper"] = np.quantile(predictive_draws, 0.95, axis=0)
         return result
