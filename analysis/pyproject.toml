@@ -2,11 +2,13 @@
 name = "nbutils"
 version = "0.1.0"
 description = "Notebook-only utilities for this repo"
-requires-python = ">=3.9"
+requires-python = ">=3.11"
 authors = [{ name = "Weishan Li" }]
 
 [project.optional-dependencies]
-pymc = ["pymc>=5.10,<6"]
+pymc = ["pymc>=5.28.0,<6"]
+gibbs = ["numpy", "pandas", "scipy", "arviz", "threadpoolctl"]
+logger = ["numpy", "pandas", "arviz", "h5netcdf", "h5py"]
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]
@@ -14,3 +16,6 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"nbutils.batchie_mono.logger" = ["schema.sql"]
