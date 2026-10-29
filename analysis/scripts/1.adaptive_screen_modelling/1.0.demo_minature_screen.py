@@ -145,14 +145,9 @@ print(f"Shared initial observations: {initial_size} | acquisition: {iterations} 
 
 
 # ## Fit PyMC NUTS and record each acquisition round
+# The Bayesian sampling uses the same centralized config, but the demo experiment is repeated with different levels of "background" (train response recrods) all with the same predicted mininal acquisition method.
 # 
-# The lightweight configuration above uses one chain, 40 tuning steps, and 30 retained draws with `thin=2` (60 post-warmup transitions). These settings test mechanics, not posterior reliability.
-# 
-# Every simulation invocation gets a fresh trajectory ID; reruns append rather than overwrite. There is no extra fit after the final acquisition: fit index 9 has 88 target observations, and final retrieval is scored at 96.
-# 
-# Source data stay external. The source checksum and preparation recipe below accompany ordered background/target fingerprints computed by orchestration. Keep the source file and this preparation code to reconstruct and verify those inputs. 
-# 
-# **Rerun required:** the SQL integration has not been run on this full dataset. No historical CSV/NetCDF artifacts are imported automatically.
+# Additionally a random acquisition baseline (which requires no training and therefore not repeated with background cell line numbers) is computed as reference.
 
 # In[4]:
 
