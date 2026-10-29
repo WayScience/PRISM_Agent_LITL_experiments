@@ -34,6 +34,14 @@ def build_model(
     :param data: EncodedObservations containing the observed responses and indices.
     :param spec: ModelSpec containing the model specification.
     :param parameterization: Either "centered" or "noncentered" parameterization for hierarchical priors.
+        For any given model parameter whose distribution prior is normal and
+        hierarchical (the mean and sd of the parameter distribution are themselves
+        random variables and have their own prior distributions), the centered
+        parameterization first samples the mean and sd, then samples the parameter
+        directly via N(mu, sd^2). This can sometimes lead to the bayesian
+        sampler struggling. Non-centered parametrization samples the parameter 
+        instead as mu + sd * z where z is just N(0, 1). This may seem to make
+        no difference but in fact is known to improve sampling. 
     :return: The model graph, usable for both prior checks and posterior fitting.
     """
 
