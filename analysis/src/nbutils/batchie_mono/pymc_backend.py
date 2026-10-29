@@ -81,7 +81,19 @@ def build_model(
         # all offsets and multi-dimensional embeddings are modeled as normal distributions.
         alpha = pm.Normal("global_offset", mu=0, tau=spec.global_precision)
 
-        def hierarchical_normal(name, precision, dims):
+        def hierarchical_normal(name: str, precision: pm.model.Var, dims: tuple | str):
+            """
+            Hierarchical normal distribution with optional non-centered parameterization.
+
+            :param name: Name of the parameter to help with readability of
+                the sampling trace, because in bayesian sampling one typically
+                samples a bunch of things with similar distribution priors and
+                having meaningful names helps in identifying them in the trace.
+            :param precision: Precision (inverse variance) of the normal distribution.            
+            :param dims: A **name** given to the dimensions of the parameter, 
+                should match the previous defined pm.Model **coordinates**.
+            :return: PyMC random variable representing the hierarchical normal parameter.
+            """
             if parameterization == "centered":
                 return pm.Normal(name, mu=0, tau=precision, dims=dims)
             z = pm.Normal("z_" + name, mu=0, sigma=1, dims=dims)
