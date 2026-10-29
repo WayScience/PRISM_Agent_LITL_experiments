@@ -148,9 +148,9 @@ print(f"Shared initial observations: {initial_size} | acquisition: {iterations} 
 # 
 # The lightweight configuration above uses one chain, 40 tuning steps, and 30 retained draws with `thin=2` (60 post-warmup transitions). These settings test mechanics, not posterior reliability.
 # 
-# One SQLite database stores each retained trace (including observed data and configuration), each actual prediction, and each selected/revealed batch with retrieval metrics. Random acquisition has no prediction records. Every simulation invocation gets a fresh trajectory ID; reruns append rather than overwrite. There is no extra fit after the final acquisition: fit index 9 has 88 target observations, and final retrieval is scored at 96.
+# Every simulation invocation gets a fresh trajectory ID; reruns append rather than overwrite. There is no extra fit after the final acquisition: fit index 9 has 88 target observations, and final retrieval is scored at 96.
 # 
-# Source data stay external. The source checksum and preparation recipe below accompany ordered background/target fingerprints computed by orchestration. Keep the source file and this preparation code to reconstruct and verify those inputs. Logging errors propagate; successful earlier writes remain committed.
+# Source data stay external. The source checksum and preparation recipe below accompany ordered background/target fingerprints computed by orchestration. Keep the source file and this preparation code to reconstruct and verify those inputs. 
 # 
 # **Rerun required:** the SQL integration has not been run on this full dataset. No historical CSV/NetCDF artifacts are imported automatically.
 
@@ -188,7 +188,7 @@ provenance = {
     "initial_size": initial_size,
     "versions": {"numpy": np.__version__, "pandas": pd.__version__},
 }
-db_path = repo_root / "output" / "miniature_screen.sqlite"
+
 experiment_name = "miniature-background-ablation"
 runs = []
 random_background_count = min(background_counts)
