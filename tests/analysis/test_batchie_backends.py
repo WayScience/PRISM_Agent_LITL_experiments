@@ -9,8 +9,8 @@ import pytest
 from pydantic import BaseModel, ValidationError
 from scipy.stats import gamma, norm
 
-from nbutils.batchie_mono.batchie import BayesianFixedDoseModel
-from nbutils.batchie_mono.batchie_selector import PredictedLowestSelector, RandomSelector
+from nbutils.batchie_mono.factorization_model import BayesianFixedDoseModel
+from nbutils.batchie_mono.model_acquisition import PredictedLowestSelector, RandomSelector
 from nbutils.batchie_mono.models import BayesianResponseModel
 from nbutils.batchie_mono.data import EncodedObservations
 from nbutils.batchie_mono.sampling import NUTSConfig

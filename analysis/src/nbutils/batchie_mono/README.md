@@ -43,6 +43,24 @@ where \($\theta$\) denotes the model parameters.
 Rather than retaining only one fitted parameter set, we want to approximate the posterior distribution of parameter values compatible with the data. 
 Propagating these values through the response model gives a distribution of plausible expected responses for each unmeasured treatment. Adding observation noise gives a predictive distribution for a future measurement.
 
+
+## Major components of monotherapy modelling
+
+```mermaid
+flowchart TD
+    D["Observed responses"] --> M["Dose-response factorization model"]
+    M <-->|"Request inference / return posterior samples"| S["Sampler: Fits the model in the Bayesian sense, and helps quantify model uncertainty."]
+    M -->|"Predictions and uncertainty"| A["Acquisition / selector"]
+    A -->|"Select and measure next batch"| D
+```
+
+- **Model:** Describes cell-line–compound responses and produces predictions from posterior samples.
+- **Sampler:** Fits the model’s posterior. The same factorization  model can be fit with different Bayesian sampler backends.
+- **Selector:** Chooses the next batch based on model prediction/uncertainty or something else. 
+
+The model is fit over-and-over as it selects subsequent experiments to perform. 
+
+
 ## Where the implementation complexity comes from
 
 Most of the additional machinery supports Bayesian shrinkage and posterior inference, regularizing for model complexity and drawing parameter sets conditional on other parameters and the observed data.

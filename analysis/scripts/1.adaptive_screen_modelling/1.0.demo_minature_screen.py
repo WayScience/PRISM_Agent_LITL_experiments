@@ -19,18 +19,19 @@
 
 
 from pathlib import Path
-import resource
+import hashlib
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
 from nbutils.batchie_mono.simulation import run_simulation
-from nbutils.batchie_mono.batchie import BayesianFixedDoseModel
-from nbutils.batchie_mono.batchie_selector import PredictedLowestSelector, RandomSelector
+from nbutils.batchie_mono.factorization_model import BayesianFixedDoseModel
+from nbutils.batchie_mono.model_acquisition import PredictedLowestSelector, RandomSelector
 from nbutils.batchie_mono.spec import ModelSpec
 from nbutils.batchie_mono.sampling import NUTSConfig
 from nbutils.batchie_mono.pymc_backend import PyMCSampler
+from nbutils.batchie_mono.logger import ExperimentLogger
 
 
 # In[2]:
@@ -144,22 +145,18 @@ print(f"Shared pool: {len(target_responses)} compounds | backgrounds: {backgroun
 print(f"Shared initial observations: {initial_size} | acquisition: {iterations} × {batch_size}")
 
 
-# ## Fit PyMC NUTS and evaluate each acquisition round
+# ## Fit PyMC NUTS and record each acquisition round
 # 
-# Use four independent chains, **100 tuning steps and 200 post-warmup draws per chain**, with `thin=1` so all 200 draws are retained for predictions. Chains run sequentially with one BLAS thread. The Gibbs notebook still uses the previous shorter schedule.
+# The lightweight configuration above uses one chain, 40 tuning steps, and 30 retained draws with `thin=2` (60 post-warmup transitions). These settings test mechanics, not posterior reliability.
 # 
-# Each fit saves its full post-warmup trace, observed rows, predictions, timing and configuration under `output/demo_sampler_comparison/pymc`, overwriting the earlier PyMC demo artifacts on rerun. There is no extra fit after the final acquisition: fit 10 has 88 target observations, and final retrieval is scored at 96. NUTS warnings are retained, not suppressed.
+# One SQLite database stores each retained trace (including observed data and configuration), each actual prediction, and each selected/revealed batch with retrieval metrics. Random acquisition has no prediction records. Every simulation invocation gets a fresh trajectory ID; reruns append rather than overwrite. There is no extra fit after the final acquisition: fit index 9 has 88 target observations, and final retrieval is scored at 96.
 # 
-# **Pending rerun:** existing outputs and the results below come from the earlier 40-tune/60-draw schedule, not this updated configuration. Restart the kernel and run all cells. Notebook 1.2 currently asserts equal sampler configurations and 60 draws per chain; it will need updating before comparing the new PyMC artifacts against the previous Gibbs run.
+# Source data stay external. The source checksum and preparation recipe below accompany ordered background/target fingerprints computed by orchestration. Keep the source file and this preparation code to reconstruct and verify those inputs. Logging errors propagate; successful earlier writes remain committed.
+# 
+# **Rerun required:** the SQL integration has not been run on this full dataset. No historical CSV/NetCDF artifacts are imported automatically.
 
 # In[4]:
 
-
-# Persist each fitted posterior without changing run_simulation or either selector.
-def cpu_seconds():
-    return sum(getattr(resource.getrusage(who), name)
-               for who in (resource.RUSAGE_SELF, resource.RUSAGE_CHILDREN)
-               for name in ("ru_utime", "ru_stime"))
 
 def make_model():
     """Create an independent model for one simulation trajectory."""
@@ -169,50 +166,97 @@ def make_model():
         prediction_seed=seed,
     )
 
+# Hash the external source once, not once per fit or comparison.
+source_hash = hashlib.sha256()
+with response_file.open("rb") as source:
+    for chunk in iter(lambda: source.read(1024 * 1024), b""):
+        source_hash.update(chunk)
+provenance = {
+    "source": str(response_file.relative_to(repo_root)),
+    "source_sha256": source_hash.hexdigest(),
+    "preparation": "miniature-background-ablation-v1",
+    "recipe": [
+        "most frequent dose; drop missing core values; mean per response key",
+        "seeded eligible target then nested background sampling without replacement",
+        "pool supported by first two backgrounds; seeded pool and initial sampling",
+    ],
+    "data_seed": seed,
+    "target_model": target_model,
+    "fixed_dose": float(fixed_dose),
+    "background_order": other_models.tolist(),
+    "background_counts": background_counts,
+    "pool_size": pool_size,
+    "initial_size": initial_size,
+    "versions": {"numpy": np.__version__, "pandas": pd.__version__},
+}
+db_path = repo_root / "output" / "miniature_screen.sqlite"
+experiment_name = "miniature-background-ablation"
 runs = []
+random_background_count = min(background_counts)
 
-for count in background_counts:
-    result = run_simulation(
-        background=backgrounds[count],
+with ExperimentLogger(db_path) as logger:
+    for count in background_counts:
+        result = run_simulation(
+            background=backgrounds[count],
+            target_responses=target_responses,
+            initial_compounds=initial_compounds,
+            model=make_model(),
+            selector=PredictedLowestSelector(),
+            batch_size=batch_size,
+            iterations=iterations,
+            logger=logger,
+            experiment_name=experiment_name,
+            metadata={**provenance, "background_cells": count},
+        )
+        result["background_cells"] = count
+        result["background_measurements"] = len(backgrounds[count])
+        runs.append(result)
+        retrieval = result.iloc[-1]["top_10pct_retrieval"]
+        print(f"{count} background lines: retrieved {retrieval:.1%} of top hits")
+
+    random_baseline = run_simulation(
+        background=backgrounds[random_background_count],
         target_responses=target_responses,
         initial_compounds=initial_compounds,
         model=make_model(),
-        selector=PredictedLowestSelector(),
+        selector=RandomSelector(seed=seed),
         batch_size=batch_size,
         iterations=iterations,
+        logger=logger,
+        experiment_name=experiment_name,
+        metadata={**provenance, "background_cells": random_background_count,
+                  "selector_seed": seed},
     )
-    result["background_cells"] = count
-    result["background_measurements"] = len(backgrounds[count])
-    runs.append(result)
-
-    retrieval = result.iloc[-1]["top_10pct_retrieval"]
-    print(f"{count} background lines: retrieved {retrieval:.1%} of top hits")
-
-random_background_count = min(background_counts)
-
-random_baseline = run_simulation(
-    background=backgrounds[random_background_count],
-    target_responses=target_responses,
-    initial_compounds=initial_compounds,
-    model=make_model(),
-    selector=RandomSelector(seed=seed),
-    batch_size=batch_size,
-    iterations=iterations,
-)
 random_baseline["background_cells"] = random_background_count
-random_baseline["background_measurements"] = len(
-    backgrounds[random_background_count]
-)
-
+random_baseline["background_measurements"] = len(backgrounds[random_background_count])
 metrics = pd.concat([*runs, random_baseline], ignore_index=True)
 metrics.groupby(["selector", "background_cells"]).tail(1)
+
+
+# In[5]:
+
+
+# Query this invocation, not every historical rerun of the same experiment.
+with ExperimentLogger(db_path) as logger:
+    saved_runs = logger.list_runs(trajectory_id=runs[0]["trajectory_id"].iloc[0])
+    run_id = saved_runs.iloc[0]["run_id"]
+    fit_metadata = logger.get_run_metadata(run_id)  # no trace BLOB read
+    _, saved_trace = logger.load_run(run_id)  # explicit, potentially large read
+    batch_id = logger.list_batches(run_id).iloc[0]["batch_id"]
+    saved_batch = logger.load_batch(int(batch_id))
+    prediction_id = saved_batch["metadata"]["last_prediction_id"]
+    saved_prediction = (
+        None if prediction_id is None else logger.load_prediction(prediction_id)
+    )
+print(fit_metadata["metadata"]["dataset"])
+saved_runs
 
 
 # ## Minimal sanity check results visualization
 
 # The plot uses circles (2), squares (6), and triangles (10) for background size, and crosses for random acquisition. Differences reflect added background information for this particular nested set, not a general guarantee about the number of cell lines needed.
 
-# In[5]:
+# In[6]:
 
 
 fig, ax = plt.subplots(figsize=(9, 5))

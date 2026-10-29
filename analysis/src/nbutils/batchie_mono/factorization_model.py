@@ -1,5 +1,5 @@
 """
-Dose-response model with BATCHIE architecture.
+Dose-response factorization model architecture.
 """
 
 from __future__ import annotations
@@ -7,7 +7,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from nbutils.batchie_mono.batchie_config import RESPONSE_KEY_COLUMNS
+from nbutils.batchie_mono.config import RESPONSE_KEY_COLUMNS
 from nbutils.batchie_mono.models import BayesianResponseModel
 from nbutils.batchie_mono.posterior import Posterior, posterior_from_trace
 from nbutils.batchie_mono.spec import ModelSpec

@@ -8,7 +8,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from .batchie_config import (
+from nbutils.batchie_mono.config import (
     COMPOUND_COLUMN,
     CORE_COLUMNS,
     DOSE_COLUMN,

@@ -1,5 +1,5 @@
 """
-BATCHIE selector implementations. 
+Dose-response model acquisition (next experiment proposal) selector. 
 """
 
 from abc import ABC, abstractmethod
@@ -7,7 +7,7 @@ from abc import ABC, abstractmethod
 import numpy as np
 import pandas as pd
 
-from nbutils.batchie_mono.batchie_config import COMPOUND_COLUMN
+from nbutils.batchie_mono.config import COMPOUND_COLUMN
 from nbutils.batchie_mono.models import ResponseModel
 
 
