@@ -23,7 +23,7 @@ def run_simulation(
     selector: BatchSelector,
     batch_size: int = 8,
     iterations: int = 10,
-    logger=None,
+    logger: object | None = None,
     experiment_name: str | None = None,
     metadata: dict | None = None,
 ) -> pd.DataFrame:
@@ -56,7 +56,7 @@ def run_simulation(
     :param selector: BatchSelector instance used for selecting batches.
     :param batch_size: Number of compounds to select in each batch.
     :param iterations: Number of iterations to run the simulation.
-    :param logger: Optional ExperimentLogger, owned/closed by the caller.
+    :param logger: Optional socket for logging all outcomes and traces as db.
     :param experiment_name: Required when logging; groups related trajectories.
     :param metadata: Caller-supplied provenance, stored separately from simulation context.
     :return: DataFrame containing retrieval metrics for each iteration.
