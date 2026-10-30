@@ -19,17 +19,18 @@
 
 
 from pathlib import Path
+import hashlib
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from nbutils.batchie_mono.batchie import BayesianFixedDoseModel
 from nbutils.batchie_mono.simulation import run_simulation
-from nbutils.batchie_mono.batchie_selector import (
-    PredictedLowestSelector,
-    RandomSelector,
-)
+from nbutils.batchie_mono.factorization_model import BayesianFixedDoseModel
+from nbutils.batchie_mono.model_acquisition import PredictedLowestSelector, RandomSelector
+from nbutils.batchie_mono.spec import ModelSpec
+from nbutils.batchie_mono.sampling import NUTSConfig
+from nbutils.batchie_mono.pymc_backend import PyMCSampler
 
 
 # In[2]:
@@ -58,6 +59,29 @@ responses.head()
 # fine for demo purpose nontheless
 # the former experiments will have separate deterministic datasplitting independent of model fitting
 seed = 0
+backend = "pymc"
+model_spec = ModelSpec(
+    rank=4,
+    prior_shape=1.1,
+    prior_rate=1.1,
+    global_precision=0.01,
+)
+
+# Original lightweight defaults, suitable for checking the API migration.
+# These are not a recommendation for reliable posterior inference.
+sampling_config = NUTSConfig(
+    burnin=40,
+    posterior_samples=30,
+    thin=2,
+    chains=1,
+    seed=seed,
+    cores=8,
+    blas_cores=1,
+    target_accept=0.9,
+    max_treedepth=10,
+    parameterization="centered",
+)
+
 rng = np.random.default_rng(seed)
 
 # initial size means the number of compounds initially tested for the target model
@@ -120,42 +144,83 @@ print(f"Shared pool: {len(target_responses)} compounds | backgrounds: {backgroun
 print(f"Shared initial observations: {initial_size} | acquisition: {iterations} × {batch_size}")
 
 
-# ## Fitting BATCHIE + eval on target every iteration
+# ## Fit PyMC NUTS and record each acquisition round
+# The Bayesian sampling uses the same centralized config, but the demo experiment is repeated with different levels of "background" (train response recrods) all with the same predicted mininal acquisition method.
 # 
-# Warnings complaining that sampling is not sufficiently extensive is expected here because we haven't finetuned the sampling process yet, causing the Gibbs sampler to not fully converge to mimic the true joint distribution. 
+# Additionally a random acquisition baseline (which requires no training and therefore not repeated with background cell line numbers) is computed as reference.
 
 # In[4]:
 
 
+def make_model():
+    """Create an independent model for one simulation trajectory."""
+    return BayesianFixedDoseModel(
+        spec=model_spec,
+        sampler=PyMCSampler(config=sampling_config),
+        prediction_seed=seed,
+    )
+
+# Hash the external source once, not once per fit or comparison.
+source_hash = hashlib.sha256()
+with response_file.open("rb") as source:
+    for chunk in iter(lambda: source.read(1024 * 1024), b""):
+        source_hash.update(chunk)
+provenance = {
+    "source": str(response_file.relative_to(repo_root)),
+    "source_sha256": source_hash.hexdigest(),
+    "preparation": "miniature-background-ablation-v1",
+    "recipe": [
+        "most frequent dose; drop missing core values; mean per response key",
+        "seeded eligible target then nested background sampling without replacement",
+        "pool supported by first two backgrounds; seeded pool and initial sampling",
+    ],
+    "data_seed": seed,
+    "target_model": target_model,
+    "fixed_dose": float(fixed_dose),
+    "background_order": other_models.tolist(),
+    "background_counts": background_counts,
+    "pool_size": pool_size,
+    "initial_size": initial_size,
+    "versions": {"numpy": np.__version__, "pandas": pd.__version__},
+}
+
+experiment_name = "miniature-background-ablation"
 runs = []
+random_background_count = min(background_counts)
+
 for count in background_counts:
     result = run_simulation(
         background=backgrounds[count],
         target_responses=target_responses,
         initial_compounds=initial_compounds,
-        model=BayesianFixedDoseModel(seed=seed),
+        model=make_model(),
         selector=PredictedLowestSelector(),
         batch_size=batch_size,
         iterations=iterations,
+        experiment_name=experiment_name,
+        metadata={**provenance, "background_cells": count},
     )
     result["background_cells"] = count
     result["background_measurements"] = len(backgrounds[count])
     runs.append(result)
-    print(f"{count} background lines: retrieved {result.iloc[-1]['top_10pct_retrieval']:.1%} of top hits")
+    retrieval = result.iloc[-1]["top_10pct_retrieval"]
+    print(f"{count} background lines: retrieved {retrieval:.1%} of top hits")
 
-# Random selection ignores predictions so any background will yield the same trajectory 
-# as we are sampling over the deterministic pool of compound names
 random_baseline = run_simulation(
-    background=backgrounds[2], # hard-coded for random baseline
+    background=backgrounds[random_background_count],
     target_responses=target_responses,
     initial_compounds=initial_compounds,
-    model=BayesianFixedDoseModel(seed=seed),
+    model=make_model(),
     selector=RandomSelector(seed=seed),
     batch_size=batch_size,
     iterations=iterations,
+    experiment_name=experiment_name,
+    metadata={**provenance, "background_cells": random_background_count,
+                "selector_seed": seed},
 )
-random_baseline["background_cells"] = 2
-random_baseline["background_measurements"] = len(backgrounds[2])
+
+random_baseline["background_cells"] = random_background_count
+random_baseline["background_measurements"] = len(backgrounds[random_background_count])
 metrics = pd.concat([*runs, random_baseline], ignore_index=True)
 metrics.groupby(["selector", "background_cells"]).tail(1)
 
@@ -163,12 +228,6 @@ metrics.groupby(["selector", "background_cells"]).tail(1)
 # ## Minimal sanity check results visualization
 
 # The plot uses circles (2), squares (6), and triangles (10) for background size, and crosses for random acquisition. Differences reflect added background information for this particular nested set, not a general guarantee about the number of cell lines needed.
-
-# As expected, BATCHIE does its job.
-# 
-# After being "trained" on 2, 6, or 10 background lines, BATCHIE demostrates far better than chance selectivity of lowest LFC (strongest killing effect) compounds on unseen cell lines.
-# 
-# Retrieves close to all top 10% killing compounds after seeing just 96 drugs (less than half) compared to random only retrieving 30%.
 
 # In[5]:
 
