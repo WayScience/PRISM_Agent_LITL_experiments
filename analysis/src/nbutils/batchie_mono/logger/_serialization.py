@@ -20,18 +20,32 @@ def _json(value):
     return json.dumps(value, default=convert, allow_nan=False, sort_keys=True)
 
 
-def _frame(frame):
-    """Encode a DataFrame as table JSON without retaining its index."""
+def _frame(frame, *, lossless=False):
+    """Encode table JSON, optionally retaining floating columns as exact hex."""
     if not frame.columns.is_unique:
         raise ValueError("Frame columns must be unique")
-    return frame.reset_index(drop=True).to_json(
+    value = frame.reset_index(drop=True).to_json(
         orient="table", index=False, double_precision=15, date_format="iso"
     )
+    if lossless:
+        table = json.loads(value)
+        table["float_hex"] = {
+            column: [None if pd.isna(item) else float(item).hex() for item in frame[column]]
+            for column in frame.select_dtypes(include="floating")
+        }
+        return json.dumps(table)
+    return value
 
 
 def _read_frame(value):
-    """Decode table JSON into a DataFrame using its stored pandas schema."""
-    return pd.read_json(StringIO(value), orient="table")
+    """Decode table JSON and restore exact floats when present; accept old rows."""
+    frame = pd.read_json(StringIO(value), orient="table")
+    for column, values in json.loads(value).get("float_hex", {}).items():
+        frame[column] = pd.Series(
+            [None if item is None else float.fromhex(item) for item in values],
+            dtype=frame[column].dtype,
+        )
+    return frame
 
 
 def _decode_run_metadata(record):

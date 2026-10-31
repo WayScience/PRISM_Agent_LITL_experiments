@@ -37,8 +37,8 @@ class ExperimentLogger(RecordsMixin, SQLiteStore):
             ``draw`` axes. Every group, coordinate, and attribute supported
             by the h5netcdf backend is serialized, not just the posterior.
         :param trajectory_id: Optional label grouping successive adaptive fits.
-        :param batch_index: Optional nonnegative Python integer; booleans are
-            rejected. This is a label, not a uniqueness constraint.
+        :param batch_index: Optional Python integer in [0, 9223372036854775807];
+            booleans are rejected. 
         :param metadata: Optional JSON-compatible caller metadata. NumPy scalars
             and arrays are supported; nonfinite numbers are rejected.
         :returns: str: Newly generated UUID identifying the committed fit row.
@@ -51,9 +51,9 @@ class ExperimentLogger(RecordsMixin, SQLiteStore):
         if batch_index is not None and (
             isinstance(batch_index, bool)
             or not isinstance(batch_index, int)
-            or batch_index < 0
+            or not 0 <= batch_index <= 2**63 - 1
         ):
-            raise ValueError("batch_index must be a nonnegative integer")
+            raise ValueError("batch_index must be an integer in [0, 9223372036854775807]")
         if not hasattr(trace, "posterior") or any(
             trace.posterior.sizes.get(axis, 0) < 1 for axis in ("chain", "draw")
         ):

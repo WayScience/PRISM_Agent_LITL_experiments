@@ -52,7 +52,8 @@ class RecordsMixin:
         :param run_id: Existing parent fit UUID.
         :param selected: DataFrame of selected identities in caller-defined order.
         :param revealed: Optional DataFrame of actually revealed responses. None
-            stores SQL NULL and is distinct from an empty DataFrame.
+            stores SQL NULL and is distinct from an empty DataFrame. Floating
+            columns are preserved exactly for audit and replay.
         :param metadata: Optional JSON-compatible acquisition context.
         """
         return self._insert(
@@ -62,7 +63,7 @@ class RecordsMixin:
                 run_id,
                 _json(metadata or {}),
                 _frame(selected),
-                None if revealed is None else _frame(revealed),
+                None if revealed is None else _frame(revealed, lossless=True),
             ),
         )
 
