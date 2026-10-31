@@ -31,6 +31,7 @@ from nbutils.batchie_mono.model_acquisition import PredictedLowestSelector, Rand
 from nbutils.batchie_mono.spec import ModelSpec
 from nbutils.batchie_mono.sampling import NUTSConfig
 from nbutils.batchie_mono.pymc_backend import PyMCSampler
+from nbutils.batchie_mono.logger import ExperimentLogger
 
 
 # In[2]:
@@ -145,9 +146,12 @@ print(f"Shared initial observations: {initial_size} | acquisition: {iterations} 
 
 
 # ## Fit PyMC NUTS and record each acquisition round
+# 
 # The Bayesian sampling uses the same centralized config, but the demo experiment is repeated with different levels of "background" (train response recrods) all with the same predicted mininal acquisition method.
 # 
 # Additionally a random acquisition baseline (which requires no training and therefore not repeated with background cell line numbers) is computed as reference.
+# 
+# One SQLite database stores each retained trace (including observed data and configuration), each actual prediction, and each selected/revealed batch with retrieval metrics. Random acquisition has no prediction records. Every simulation invocation gets a fresh trajectory ID; reruns append rather than overwrite. There is no extra fit after the final acquisition: fit index 9 has 88 target observations, and final retrieval is scored at 96.
 
 # In[4]:
 
@@ -183,53 +187,74 @@ provenance = {
     "initial_size": initial_size,
     "versions": {"numpy": np.__version__, "pandas": pd.__version__},
 }
-
+db_path = repo_root / "output" / "miniature_screen.sqlite"
 experiment_name = "miniature-background-ablation"
 runs = []
 random_background_count = min(background_counts)
 
-for count in background_counts:
-    result = run_simulation(
-        background=backgrounds[count],
+with ExperimentLogger(db_path) as logger:
+    for count in background_counts:
+        result = run_simulation(
+            background=backgrounds[count],
+            target_responses=target_responses,
+            initial_compounds=initial_compounds,
+            model=make_model(),
+            selector=PredictedLowestSelector(),
+            batch_size=batch_size,
+            iterations=iterations,
+            logger=logger,
+            experiment_name=experiment_name,
+            metadata={**provenance, "background_cells": count},
+        )
+        result["background_cells"] = count
+        result["background_measurements"] = len(backgrounds[count])
+        runs.append(result)
+        retrieval = result.iloc[-1]["top_10pct_retrieval"]
+        print(f"{count} background lines: retrieved {retrieval:.1%} of top hits")
+
+    random_baseline = run_simulation(
+        background=backgrounds[random_background_count],
         target_responses=target_responses,
         initial_compounds=initial_compounds,
         model=make_model(),
-        selector=PredictedLowestSelector(),
+        selector=RandomSelector(seed=seed),
         batch_size=batch_size,
         iterations=iterations,
+        logger=logger,
         experiment_name=experiment_name,
-        metadata={**provenance, "background_cells": count},
+        metadata={**provenance, "background_cells": random_background_count,
+                  "selector_seed": seed},
     )
-    result["background_cells"] = count
-    result["background_measurements"] = len(backgrounds[count])
-    runs.append(result)
-    retrieval = result.iloc[-1]["top_10pct_retrieval"]
-    print(f"{count} background lines: retrieved {retrieval:.1%} of top hits")
-
-random_baseline = run_simulation(
-    background=backgrounds[random_background_count],
-    target_responses=target_responses,
-    initial_compounds=initial_compounds,
-    model=make_model(),
-    selector=RandomSelector(seed=seed),
-    batch_size=batch_size,
-    iterations=iterations,
-    experiment_name=experiment_name,
-    metadata={**provenance, "background_cells": random_background_count,
-                "selector_seed": seed},
-)
-
 random_baseline["background_cells"] = random_background_count
 random_baseline["background_measurements"] = len(backgrounds[random_background_count])
 metrics = pd.concat([*runs, random_baseline], ignore_index=True)
 metrics.groupby(["selector", "background_cells"]).tail(1)
 
 
+# In[5]:
+
+
+# Query this invocation, not every historical rerun of the same experiment.
+with ExperimentLogger(db_path) as logger:
+    saved_runs = logger.list_runs(trajectory_id=runs[0]["trajectory_id"].iloc[0])
+    run_id = saved_runs.iloc[0]["run_id"]
+    fit_metadata = logger.get_run_metadata(run_id)  # no trace BLOB read
+    _, saved_trace = logger.load_run(run_id)  # explicit, potentially large read
+    batch_id = logger.list_batches(run_id).iloc[0]["batch_id"]
+    saved_batch = logger.load_batch(int(batch_id))
+    prediction_id = saved_batch["metadata"]["last_prediction_id"]
+    saved_prediction = (
+        None if prediction_id is None else logger.load_prediction(prediction_id)
+    )
+print(fit_metadata["metadata"]["dataset"])
+saved_runs
+
+
 # ## Minimal sanity check results visualization
 
 # The plot uses circles (2), squares (6), and triangles (10) for background size, and crosses for random acquisition. Differences reflect added background information for this particular nested set, not a general guarantee about the number of cell lines needed.
 
-# In[5]:
+# In[6]:
 
 
 fig, ax = plt.subplots(figsize=(9, 5))
