@@ -20,10 +20,12 @@
 
 from pathlib import Path
 import hashlib
+import json
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import xarray as xr
 
 from nbutils.batchie_mono.simulation import run_simulation
 from nbutils.batchie_mono.factorization_model import BayesianFixedDoseModel
@@ -34,7 +36,7 @@ from nbutils.batchie_mono.pymc_backend import PyMCSampler
 from nbutils.batchie_mono.logger import ExperimentLogger
 
 
-# In[2]:
+# In[ ]:
 
 
 repo_root = next(
@@ -145,13 +147,17 @@ print(f"Shared pool: {len(target_responses)} compounds | backgrounds: {backgroun
 print(f"Shared initial observations: {initial_size} | acquisition: {iterations} × {batch_size}")
 
 
-# ## Fit PyMC NUTS and record each acquisition round
+# ## Fit PyMC NUTS, log v2 actions, and reopen the bundle
 # 
-# The Bayesian sampling uses the same centralized config, but the demo experiment is repeated with different levels of "background" (train response recrods) all with the same predicted mininal acquisition method.
+# The current backend uses `BayesianFixedDoseModel(spec=..., sampler=PyMCSampler(config=...))`. The same lightweight configuration is used for each nested background. These short chains demonstrate API and serialization compatibility, not reliable posterior inference.
 # 
-# Additionally a random acquisition baseline (which requires no training and therefore not repeated with background cell line numbers) is computed as reference.
+# The shared random policy never calls `predict`. The existing simulator still fits before every selection, including random selection; logging does not add or remove any fits.
 # 
-# One SQLite database stores each retained trace (including observed data and configuration), each actual prediction, and each selected/revealed batch with retrieval metrics. Random acquisition has no prediction records. Every simulation invocation gets a fresh trajectory ID; reruns append rather than overwrite. There is no extra fit after the final acquisition: fit index 9 has 88 target observations, and final retrieval is scored at 96.
+# A new `miniature_screen_v2.sqlite` bundle preserves historical v1 output. SQLite holds dataset/split provenance, exact ordered fit inputs, immutable state/action lineage, frozen predictions, ordered acquisitions, and evaluations. Retained traces are checksum-verified NetCDF artifacts beside the database. Reruns append fresh experiment IDs.
+# 
+# The next cell closes and reopens the logger, verifies all artifact checksums, compares each final trace with the actual fitted model, and reconstructs every retrieval trajectory from saved responses, selections, and evaluations. The plot then uses the reloaded metrics. Reloading supports posterior analysis; it does not reconstruct a fitted model or resume sampling.
+# 
+# There is no fit after the final acquisition: the last fit sees 88 target observations; final retrieval is scored at 96.
 
 # In[4]:
 
@@ -170,14 +176,16 @@ with response_file.open("rb") as source:
     for chunk in iter(lambda: source.read(1024 * 1024), b""):
         source_hash.update(chunk)
 provenance = {
-    "source": str(response_file.relative_to(repo_root)),
-    "source_sha256": source_hash.hexdigest(),
-    "preparation": "miniature-background-ablation-v1",
-    "recipe": [
-        "most frequent dose; drop missing core values; mean per response key",
-        "seeded eligible target then nested background sampling without replacement",
-        "pool supported by first two backgrounds; seeded pool and initial sampling",
-    ],
+    "dataset": {
+        "source": str(response_file.relative_to(repo_root)),
+        "source_sha256": source_hash.hexdigest(),
+        "preparation": "miniature-background-ablation-v1",
+        "recipe": [
+            "most frequent dose; drop missing core values; mean per response key",
+            "seeded eligible target then nested background sampling without replacement",
+            "pool supported by first two backgrounds; seeded pool and initial sampling",
+        ],
+    },
     "data_seed": seed,
     "target_model": target_model,
     "fixed_dose": float(fixed_dose),
@@ -185,20 +193,24 @@ provenance = {
     "background_counts": background_counts,
     "pool_size": pool_size,
     "initial_size": initial_size,
+    "backend": backend,
     "versions": {"numpy": np.__version__, "pandas": pd.__version__},
 }
-db_path = repo_root / "output" / "miniature_screen.sqlite"
+# V1 logs are intentionally not migrated or overwritten.
+db_path = repo_root / "output" / "miniature_screen_v2.sqlite"
 experiment_name = "miniature-background-ablation"
 runs = []
+fitted_models = {}  # Retain only each trajectory's last model for round-trip checks.
 random_background_count = min(background_counts)
 
 with ExperimentLogger(db_path) as logger:
     for count in background_counts:
+        model = make_model()
         result = run_simulation(
             background=backgrounds[count],
             target_responses=target_responses,
             initial_compounds=initial_compounds,
-            model=make_model(),
+            model=model,
             selector=PredictedLowestSelector(),
             batch_size=batch_size,
             iterations=iterations,
@@ -206,17 +218,19 @@ with ExperimentLogger(db_path) as logger:
             experiment_name=experiment_name,
             metadata={**provenance, "background_cells": count},
         )
+        fitted_models[result["trajectory_id"].iloc[0]] = model
         result["background_cells"] = count
         result["background_measurements"] = len(backgrounds[count])
         runs.append(result)
         retrieval = result.iloc[-1]["top_10pct_retrieval"]
         print(f"{count} background lines: retrieved {retrieval:.1%} of top hits")
 
+    model = make_model()
     random_baseline = run_simulation(
         background=backgrounds[random_background_count],
         target_responses=target_responses,
         initial_compounds=initial_compounds,
-        model=make_model(),
+        model=model,
         selector=RandomSelector(seed=seed),
         batch_size=batch_size,
         iterations=iterations,
@@ -225,29 +239,115 @@ with ExperimentLogger(db_path) as logger:
         metadata={**provenance, "background_cells": random_background_count,
                   "selector_seed": seed},
     )
+    fitted_models[random_baseline["trajectory_id"].iloc[0]] = model
 random_baseline["background_cells"] = random_background_count
 random_baseline["background_measurements"] = len(backgrounds[random_background_count])
 metrics = pd.concat([*runs, random_baseline], ignore_index=True)
 metrics.groupby(["selector", "background_cells"]).tail(1)
 
 
-# In[5]:
+# In[ ]:
 
 
-# Query this invocation, not every historical rerun of the same experiment.
+# Reopen the closed bundle: v2 uses experiment/action IDs, not v1 run/batch tables.
+# Restrict checks to this invocation; earlier reruns may share the experiment name.
+reloaded_records = []
+reload_checks = []
+trajectory_ids = metrics["trajectory_id"].unique().tolist()
 with ExperimentLogger(db_path) as logger:
-    saved_runs = logger.list_runs(trajectory_id=runs[0]["trajectory_id"].iloc[0])
-    run_id = saved_runs.iloc[0]["run_id"]
-    fit_metadata = logger.get_run_metadata(run_id)  # no trace BLOB read
-    _, saved_trace = logger.load_run(run_id)  # explicit, potentially large read
-    batch_id = logger.list_batches(run_id).iloc[0]["batch_id"]
-    saved_batch = logger.load_batch(int(batch_id))
-    prediction_id = saved_batch["metadata"]["last_prediction_id"]
-    saved_prediction = (
-        None if prediction_id is None else logger.load_prediction(prediction_id)
-    )
-print(fit_metadata["metadata"]["dataset"])
-saved_runs
+
+    for trajectory_id in trajectory_ids:
+        experiment = logger.one(
+            "SELECT * FROM experiments WHERE experiment_id=?", (trajectory_id,)
+        )
+
+        config = json.loads(experiment["config"])
+        context = config["provenance"]
+        dataset = logger.one(
+            "SELECT d.* FROM datasets d JOIN splits s USING(dataset_id) WHERE s.split_id=?",
+            (experiment["split_id"],),
+        )
+
+        actions = pd.DataFrame(logger.rows(
+            "SELECT a.*, s.sequence FROM actions a "
+            "JOIN experiment_states s ON s.state_id=a.output_state_id "
+            "WHERE a.experiment_id=? ORDER BY s.sequence", (trajectory_id,)
+        ))
+        fits = actions[actions["kind"].eq("fit")]
+        acquisitions = actions[actions["kind"].eq("acquire")]
+
+        # Verify every artifact's checksum; compare the final trace to the live fit.
+        for fit_id in fits["action_id"]:
+            for artifact in logger.artifact_records(fit_id):
+                logger.artifacts.verify(artifact)
+        fit_id = fits.iloc[-1]["action_id"]
+        fit_metadata, trace = logger.load_run(fit_id)
+        original = fitted_models[trajectory_id].inference_data_
+
+        for group in trace.groups():
+            xr.testing.assert_identical(trace[group], original[group])
+
+
+        # Recover the fixed target pool and hit set using only registered responses.
+        target = pd.DataFrame(logger.rows(
+            "SELECT r.* FROM responses r JOIN split_memberships m USING(response_id) "
+            "WHERE m.split_id=? AND r.cell_id=?",
+            (experiment["split_id"], context["target_model"]),
+        ))
+        hit_ids = set(target.sort_values(["value", "drug_id"]).head(
+            max(1, int(np.ceil(0.1 * len(target)))))["response_id"])
+        initial_state = logger.one(
+            "SELECT * FROM experiment_states WHERE experiment_id=? AND sequence=0",
+            (trajectory_id,),
+        )
+        seen = logger.revealed_ids(initial_state["data_state_id"]) & set(target["response_id"])
+        rows = [dict(config["initial_metrics"])]
+        for action in acquisitions.to_dict("records"):
+            batch = logger.one(
+                "SELECT * FROM acquisitions WHERE action_id=?", (action["action_id"],)
+            )
+            selected = logger.rows(
+                "SELECT * FROM acquisition_items WHERE action_id=? ORDER BY rank",
+                (action["action_id"],),
+            )
+
+            selected_ids = {item["response_id"] for item in selected}
+
+            seen.update(selected_ids)
+            values = {row["metric"]: row["value"] for row in logger.rows(
+                "SELECT * FROM evaluations WHERE action_id=? AND scope='simulation'",
+                (action["action_id"],),
+            )}
+
+            if config["selector"] != "random":
+
+                prediction = logger.rows(
+                    "SELECT * FROM prediction_values WHERE prediction_id=? ORDER BY position",
+                    (batch["prediction_id"],),
+                )
+
+            rows.append({"selector": config["selector"], **values})
+        for row in rows:
+            row.update(
+                trajectory_id=trajectory_id,
+                background_cells=context["background_cells"],
+                background_measurements=len(logger.rows(
+                    "SELECT r.response_id FROM responses r JOIN split_memberships m USING(response_id) "
+                    "WHERE m.split_id=? AND m.role='initial' AND r.cell_id!=?",
+                    (experiment["split_id"], context["target_model"]),
+                )),
+            )
+        reloaded_records.extend(rows)
+        reload_checks.append({
+            "trajectory_id": trajectory_id, "selector": config["selector"],
+            "background_cells": context["background_cells"],
+            "fits": len(fits), "acquisitions": len(acquisitions),
+            "trace_equal": True, "retrieval_replayed": True,
+        })
+    saved_trace = trace  # Eagerly loaded; still usable after this connection closes.
+
+reloaded_metrics = pd.DataFrame(reloaded_records)[metrics.columns]
+pd.DataFrame(reload_checks)
 
 
 # ## Minimal sanity check results visualization
@@ -257,16 +357,18 @@ saved_runs
 # In[6]:
 
 
+# Plot persisted/reloaded trajectories, not the original in-memory results.
 fig, ax = plt.subplots(figsize=(9, 5))
 markers = {2: "o", 6: "s", 10: "^"}
-predicted_metrics = metrics[metrics["selector"].eq("predicted_lowest")]
+predicted_metrics = reloaded_metrics[reloaded_metrics["selector"].eq("predicted_lowest")]
 for count, trajectory in predicted_metrics.groupby("background_cells"):
     ax.plot(
         trajectory["compounds_seen"], trajectory["top_10pct_retrieval"],
         marker=markers[count], label=f"Predicted lowest — {count} background lines",
     )
+reloaded_random = reloaded_metrics[reloaded_metrics["selector"].eq("random")]
 ax.plot(
-    random_baseline["compounds_seen"], random_baseline["top_10pct_retrieval"],
+    reloaded_random["compounds_seen"], reloaded_random["top_10pct_retrieval"],
     color="black", linestyle="--", marker="x", label="Random — shared baseline",
 )
 ax.set(
@@ -274,7 +376,7 @@ ax.set(
     ylabel="Proportion of top-10% killing compounds retrieved",
     title=f"{target_model} | dose {fixed_dose:g} | {len(target_responses)}-compound pool",
     ylim=(0, 1.05),
-    xticks=random_baseline["compounds_seen"],
+    xticks=reloaded_random["compounds_seen"],
 )
 ax.grid(alpha=0.25)
 ax.legend()
