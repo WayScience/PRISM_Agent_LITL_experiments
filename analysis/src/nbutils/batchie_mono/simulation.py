@@ -48,8 +48,9 @@ def run_simulation(
     prediction_seed; orchestration wraps it to record actual fit/predict calls.
     Input fingerprints are computed once; caller metadata holds the external
     source checksums, preparation recipe and seeds. Only revealed responses
-    enter the model. Each write commits independently and errors propagate.
-    Zero fits means zero database records (including zero requested rounds).
+    enter the model. Completed actions commit atomically; errors propagate.
+    Zero fits still records the experiment and its initial data state. Traces
+    are external files beside the database; logging does not add model calls.
 
     :param background: DataFrame containing background response observations.
     :param target_responses: DataFrame containing target observations (prediction targets).
@@ -88,61 +89,63 @@ def run_simulation(
 
     logged_model = None
     if logger is not None:
-        from nbutils.batchie_mono.logger import LoggedModel, fingerprint_responses
+        from nbutils.batchie_mono.logger import LoggedModel
 
         if isinstance(model, LoggedModel):
             raise ValueError("Pass a bare model when supplying logger to run_simulation")
         logged_model = LoggedModel(model, logger, experiment_name)
-        logged_model.metadata = {
-            "provenance": dict(metadata or {}),
-            "dataset": {
-                "background": fingerprint_responses(background),
-                "target": fingerprint_responses(target_responses),
-                "background_rows": len(background),
-                "target_rows": len(target_responses),
-            },
-            "simulation": {
-                "selector": selector.name,
-                "batch_size": batch_size,
-                "iterations": iterations,
-                "initial_compounds": observed_target[COMPOUND_COLUMN].tolist(),
-                "initial_metrics": metrics(0),
-            },
-        }
+        logged_model.configure(
+            background=background, target=target_responses, initial=observed_target,
+            selector=selector, batch_size=batch_size, iterations=iterations,
+            metadata=metadata, initial_metrics=metrics(0),
+        )
         model = logged_model
 
-    records = []
-    for iteration in range(iterations + 1):
-        records.append(metrics(iteration))
-        if iteration == iterations or remaining.empty:
-            break
+    try:
+        records = []
+        for iteration in range(iterations + 1):
+            records.append(metrics(iteration))
+            if iteration == iterations or remaining.empty:
+                break
 
-        model.fit(pd.concat([background, observed_target], ignore_index=True))
-        selected = selector.select(
-            model=model,
-            candidate_pairs=remaining[RESPONSE_KEY_COLUMNS].copy(),
-            evaluation_pairs=evaluation_pairs,
-            batch_size=min(batch_size, len(remaining)),
-        )
-        newly_revealed = remaining[remaining[COMPOUND_COLUMN].isin(selected)]
-        observed_target = pd.concat([observed_target, newly_revealed], ignore_index=True)
-        if logged_model is not None:
-            # Preserve selector order, not the pool's order, in the selection artifact.
-            selected_pairs = remaining.set_index(COMPOUND_COLUMN, drop=False).loc[
-                selected, RESPONSE_KEY_COLUMNS
-            ]
-            logger.log_batch(
-                logged_model.last_run_id,
-                selected_pairs,
-                newly_revealed,
-                metadata={
-                    "iteration": iteration + 1,
-                    "last_prediction_id": logged_model.last_prediction_id,
-                    "metrics_before": records[-1],
-                    "metrics_after": metrics(iteration + 1),
-                },
+            model.fit(pd.concat([background, observed_target], ignore_index=True))
+            acquisition_action_id = (
+                logged_model.begin_acquisition(iteration + 1)
+                if logged_model is not None else None
             )
-        remaining = remaining[~remaining[COMPOUND_COLUMN].isin(selected)].copy()
+            selected = selector.select(
+                model=model,
+                candidate_pairs=remaining[RESPONSE_KEY_COLUMNS].copy(),
+                evaluation_pairs=evaluation_pairs,
+                batch_size=min(batch_size, len(remaining)),
+            )
+            newly_revealed = remaining[remaining[COMPOUND_COLUMN].isin(selected)]
+            observed_target = pd.concat([observed_target, newly_revealed], ignore_index=True)
+            if logged_model is not None:
+                # Preserve selector order, not the pool's order, in the selection artifact.
+                selected_pairs = remaining.set_index(COMPOUND_COLUMN, drop=False).loc[
+                    selected, RESPONSE_KEY_COLUMNS
+                ]
+                logger.log_batch(
+                    logged_model.last_run_id,
+                    selected_pairs,
+                    newly_revealed,
+                    metadata={
+                        "iteration": iteration + 1,
+                        "acquisition_action_id": acquisition_action_id,
+                        "last_prediction_id": logged_model.last_prediction_id,
+                        "metrics_before": records[-1],
+                        "metrics_after": metrics(iteration + 1),
+                    },
+                )
+            remaining = remaining[~remaining[COMPOUND_COLUMN].isin(selected)].copy()
+
+    except BaseException as error:
+        if logged_model is not None:
+            logger.finish_experiment(logged_model.trajectory_id, error=error)
+        raise
+    if logged_model is not None:
+        logger.finish_experiment(logged_model.trajectory_id)
 
     result = pd.DataFrame.from_records(records)
     if logged_model is not None:

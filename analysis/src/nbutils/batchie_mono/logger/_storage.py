@@ -1,134 +1,145 @@
-"""Own SQLite resources and transaction boundaries for the logger package.
-
-This module depends only on the standard library. ``SQLiteStore`` creates new
-databases from the adjacent SQL schema, checks existing database version/table
-names, enables foreign keys, and ensures child-record lookup indexes exist.
-It does not interpret traces, JSON payloads, or experiment semantics.
-
-Each ``_insert`` is its own connection transaction. Closing the store does not
-undo previous successful writes, and the context manager does not wrap a whole
-experiment in a transaction. Connections retain SQLite's same-thread restriction;
-use a controller writer rather than sharing a logger across sampling workers.
+"""
+Connection lifecycle, canonical JSON, transactions and other small helpers
 """
 
-import sqlite3
-from contextlib import AbstractContextManager
+import json
+from contextlib import contextmanager
+from datetime import datetime, timezone
+from hashlib import sha256
 from pathlib import Path
+from uuid import uuid4
+
+import sqlite3
 
 
-class SQLiteStore(AbstractContextManager):
-    """Manage a logger connection and provide private insert/lookup primitives.
+def uid() -> str:
+    return str(uuid4())
 
-    ``connection`` is a sqlite3 connection using named ``sqlite3.Row`` results.
-    Context entry returns this instance; context exit closes it without
-    suppressing exceptions. Subclasses supply artifact-specific operations.
+
+def now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def encode(value: object) -> str:
+    """Canonical, finite JSON; NumPy scalars are accepted without importing NumPy."""
+
+    def convert(item):
+        if hasattr(item, "item"):
+            return item.item()
+        raise TypeError(f"Not JSON serializable: {type(item).__name__}")
+
+    return json.dumps(
+        value, sort_keys=True, allow_nan=False, default=convert, separators=(",", ":")
+    )
+
+
+def digest(value: object) -> str:
+    return sha256(encode(value).encode()).hexdigest()
+
+
+class SQLiteStore:
+    """
+    Manage a logger connection and provide private insert/lookup primitives.
     """
 
-    def __init__(self, db_path="experiments.sqlite"):
-        """Open a database and initialize or check its version-1 schema.
-
-        Args:
-            db_path: Filesystem path accepted by pathlib.Path. Missing parent
-                directories are created; SQLite waits up to 30 seconds for locks.
-
-        Raises:
-            ValueError: An existing database has an unsupported version or
-                lacks a required table. Validation checks version and table
-                names, not every column definition.
-
-        Empty unversioned databases are initialized atomically from schema.sql.
-        Existing v1 databases gain missing lookup indexes without a version
-        change. Filesystem/SQLite errors propagate; if setup fails after opening
-        the connection, it is closed before the exception is re-raised.
+    def __init__(self, db_path: str | Path ="experiments.sqlite", *, timeout: float = 30):
         """
-        path = Path(db_path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        self.connection = sqlite3.connect(path, timeout=30)
+        Initialize the SQLiteStore with the given database path and timeout.
+
+        :param db_path: Path to the SQLite database file.
+        :param timeout: Timeout for SQLite connections in seconds.
+        """
+
+        if sqlite3.sqlite_version_info < (3, 37):
+            raise RuntimeError("SQLite >=3.37 is required for STRICT tables")
+
+        self.path = Path(db_path).resolve()
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.connection = sqlite3.connect(self.path, timeout=timeout, isolation_level=None)
         self.connection.row_factory = sqlite3.Row
         try:
             self.connection.execute("PRAGMA foreign_keys = ON")
+            # Initialize before launching workers. Existing databases never run DDL.
             version = self.connection.execute("PRAGMA user_version").fetchone()[0]
-            tables = {
-                row[0]
-                for row in self.connection.execute(
+            if version == 0:
+                if self.connection.execute(
                     "SELECT name FROM sqlite_master WHERE type='table'"
-                )
-            }
-            if version == 0 and not tables:
+                ).fetchone():
+                    raise ValueError("Unrecognized database; use a new v2 file")
                 schema = Path(__file__).with_name("schema.sql").read_text()
-                self.connection.executescript("BEGIN;\n" + schema + "\nCOMMIT;")
-            elif version != 1 or not {
-                "experiment_runs",
-                "predictions",
-                "batches",
-            }.issubset(tables):
-                raise ValueError("Unsupported experiment logger schema")
-            # Also upgrade query performance for existing v1 databases.
-            with self.connection:
-                self.connection.execute(
-                    "CREATE INDEX IF NOT EXISTS predictions_by_run ON predictions(run_id)"
+                self.connection.executescript(
+                    "BEGIN IMMEDIATE;\n" + schema + "\nCOMMIT;"
                 )
-                self.connection.execute(
-                    "CREATE INDEX IF NOT EXISTS batches_by_run ON batches(run_id)"
+            elif version != 2:
+                raise ValueError(
+                    "Legacy/unsupported schema; retain it and use a new v2 file"
                 )
-        except Exception:
-            self.close()
+            self.connection.execute("PRAGMA journal_mode=WAL")
+            self.connection.execute("PRAGMA synchronous=FULL")
+        except BaseException:
+            self.connection.close()
             raise
 
+    @contextmanager
+    def transaction(self):
+        """
+        Begin an immediate transaction for atomic operations.
+        Commits on success, rolls back on exception.
+        """
+        self.connection.execute("BEGIN IMMEDIATE")
+        try:
+            yield
+            self.connection.commit()
+        except BaseException:
+            self.connection.rollback()
+            raise
+
+    def one(self, sql: str, parameters: tuple = ()):
+        """
+        Fetch a single row from the database.
+
+        :param sql: SQL query to execute.
+        :param parameters: Parameters for the SQL query.
+        :return: A dictionary representing the row.
+        :raises KeyError: If no row is found.
+        """
+        row = self.connection.execute(sql, parameters).fetchone()
+        if row is None:
+            raise KeyError(parameters)
+        return dict(row)
+
+    def rows(self, sql: str, parameters: tuple = ()):
+        """
+        Fetch multiple rows from the database.
+
+        :param sql: SQL query to execute.
+        :param parameters: Parameters for the SQL query.
+        :return: A list of dictionaries representing the rows.
+        """
+        return [dict(row) for row in self.connection.execute(sql, parameters)]
+
+    def insert(self, table: str, **values):
+        """
+        Insert a row into the specified table.
+
+        :param table: Name of the table to insert into.
+        :param values: Column-value pairs to insert.
+        """
+
+        columns = ",".join(values)
+        marks = ",".join("?" for _ in values)
+        self.connection.execute(
+            f"INSERT INTO {table} ({columns}) VALUES ({marks})", tuple(values.values())
+        )
 
     def close(self):
-        """Close the owned connection, releasing database resources.
-
-        Earlier committed records remain persisted. Pending caller-managed
-        transactions are not committed by this method. Repeated closes are safe;
-        subsequent queries or writes on the closed connection fail.
-        """
+        """Close the database connection."""
         self.connection.close()
 
+    def __enter__(self):
+        """Enter the runtime context related to this object."""
+        return self
 
-    def __exit__(self, *args):
-        """Close on context exit, returning None so exceptions propagate.
-
-        Args:
-            *args: Exception type, value, and traceback from the with statement;
-                accepted for the context-manager protocol, otherwise unused.
-        """
+    def __exit__(self, *exc):
+        """Exit the runtime context and close the database connection."""
         self.close()
-
-
-    def _insert(self, sql, values):
-        """Execute one parameterized write and return its last inserted row ID.
-
-        Args:
-            sql: Internal SQL statement using SQLite parameter placeholders.
-            values: Bound parameter values, never interpolated into SQL text.
-
-        Returns:
-            int or None: SQLite cursor.lastrowid (an integer for current inserts).
-
-        The connection context commits on success and rolls back on failure;
-        database errors propagate. Callers must not use this helper inside a
-        larger transaction expecting several logger calls to be atomic: the
-        context also commits any transaction already active on this connection.
-        """
-        with self.connection:
-            return self.connection.execute(sql, values).lastrowid
-
-
-    def _row(self, sql, key):
-        """Fetch one keyed row as a mutable dictionary without committing.
-
-        Args:
-            sql: Internal lookup statement with one bound parameter.
-            key: Value bound to that parameter.
-
-        Returns:
-            dict: First matching row with column names as keys.
-
-        Raises:
-            KeyError: No row matches ``key``. SQLite errors propagate unchanged.
-        """
-        row = self.connection.execute(sql, (key,)).fetchone()
-        if row is None:
-            raise KeyError(key)
-        return dict(row)

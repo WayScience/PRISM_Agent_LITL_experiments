@@ -1,29 +1,16 @@
-"""Verify ordered response inputs without importing Batchie model code.
-"""
+"""Response-data fingerprints, independent of model integration and logging."""
 
-import hashlib
-import json
-import math
+from nbutils.batchie_mono.logger._storage import digest
+from nbutils.batchie_mono.logger.response_data import response_records
 
 
 def fingerprint_responses(frame):
+    """Order-independent fingerprint of response identities and measured values.
+
+    Only ModelID, broad_id, dose and logfold_change participate; the DataFrame
+    index and unrelated columns are ignored. Duplicate rows are retained.
     """
-    Fingerprints a drug-model response dataset accompanying the experiment log.
-   
-    :params frame: DataFrame containing ``ModelID``, ``broad_id``, ``dose``, and
-        ``logfold_change``. IDs must be strings; numeric values must be
-        convertible to finite Python floats (float64 precision).
-    :returns: Fingerprint string of the form ``responses-v1:sha256:<digest>``.
-    """
-    columns = ["ModelID", "broad_id", "dose", "logfold_change"]
-    digest = hashlib.sha256()
-    digest.update(json.dumps(["responses-v1", columns]).encode("utf-8"))
-    for model, compound, dose, response in frame[columns].itertuples(index=False, name=None):
-        if not isinstance(model, str) or not isinstance(compound, str):
-            raise ValueError("Response fingerprints require string identifiers")
-        numbers = [float(dose), float(response)]
-        if not all(math.isfinite(value) for value in numbers):
-            raise ValueError("Response fingerprints require finite dose and response")
-        row = [model, compound, *(value.hex() for value in numbers)]
-        digest.update(b"\n" + json.dumps(row, ensure_ascii=True).encode("utf-8"))
-    return "responses-v1:sha256:" + digest.hexdigest()
+    records = response_records(frame)
+    return digest(
+        sorted(records, key=lambda r: (r["cell_id"], r["drug_id"], r["dose"]))
+    )

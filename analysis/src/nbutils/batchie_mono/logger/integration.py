@@ -1,114 +1,276 @@
-"""Record model calls without importing Batchie models or sampler backends.
-
-``LoggedModel`` adapts a caller-owned fit/predict model to ``ExperimentLogger``.
-It records actual successful calls only; acquisition and truth revelation remain
-the controller's responsibility. Writes commit independently, so a partially
-recorded trajectory is not proof of completion or an automatic recovery point.
+"""
+Bayesian Factorization integration adapter for the experiment logger.
 """
 
-from uuid import uuid4
+import json
+import numpy as np
+import pandas as pd
+
+from nbutils.batchie_mono.logger.artifacts import write_inference_data
+from nbutils.batchie_mono.logger.response_data import (
+    KEYS,
+    dataset_for_action,
+    frame_ids,
+    response_records,
+    verify_truth,
+)
+
+
+def default_snapshot(model, store):
+    """Bayesian snapshot, or an explicit future model-provided serializer.
+
+    Non-Bayesian implementations implement logging_snapshot(store) returning
+    (manifest, artifacts), or pass a snapshot callable to LoggedModel. We never
+    silently pickle models or claim that a trace is a resumable sampler state.
+    """
+    trace = getattr(model, "inference_data_", None)
+    if trace is None:
+        method = getattr(model, "logging_snapshot", None)
+        if method is None:
+            raise TypeError("Model needs inference_data_ or logging_snapshot(store)")
+        return method(store)
+    attrs = dict(trace.attrs)
+    for field in ("model_config", "inference_config"):
+        if isinstance(attrs.get(field), str):
+            attrs[field] = json.loads(attrs[field])
+    artifact = write_inference_data(store, trace)
+    return {
+        "schema_version": 1,
+        "model_family": "bayesian_factorization",
+        "capabilities": ["posterior_analysis", "prediction_with_adapter"],
+        "implementation": type(model).__module__ + "." + type(model).__qualname__,
+        "prediction_seed": getattr(model, "prediction_seed", None),
+        "trace_metadata": attrs,
+    }, [artifact]
 
 
 class LoggedModel:
-    """Log fit/predict calls and forward other attributes to a wrapped model.
+    """Delegate fit/predict exactly once while recording their actual outcomes.
 
-    One run identifies one fit; a trajectory groups this wrapper's adaptive
-    fits. The model exposes ``inference_data_`` after fit and ``prediction_seed``.
-    Fit and predict through this wrapper, not directly through the model, to
-    keep recorded state aligned. Other forwarded methods are not logged.
-
-    Errors propagate without retries or failed-fit records. The wrapper owns
-    neither the model nor the logger and does not close either. Attribute reads
-    are forwarded, but assignments on the wrapper are not: change model settings
-    on ``model`` itself. This mutable wrapper is intended for one controller.
+    posterior_draws and all other attributes delegate unchanged. Only calls to
+    predict create prediction records. A future selector that uses draws alone
+    should explicitly supply its pre-reveal prediction summary to the logger.
     """
 
-    def __init__(
-        self,
-        model,
-        logger,
-        experiment_name,
-        *,
-        trajectory_id=None,
-        first_batch=0,
-        metadata=None,
-    ):
-        """Configure call recording without fitting or writing to the database.
-
-        Args:
-            model: Model with fit/predict methods and the attributes above.
-            logger: ExperimentLogger-compatible persistence object.
-            experiment_name: Nonblank string grouping related trajectories.
-            trajectory_id: Optional grouping label; None generates a new UUID.
-            first_batch: Nonnegative Python integer starting the fit counter.
-            metadata: Optional mapping shallow-copied into fit metadata.
-
-        Raises:
-            ValueError: Invalid experiment name or first batch index.
-        """
-        if not isinstance(experiment_name, str) or not experiment_name.strip():
-            raise ValueError("experiment_name must be a nonempty string")
-        if isinstance(first_batch, bool) or not isinstance(first_batch, int) or first_batch < 0:
-            raise ValueError("first_batch must be a nonnegative integer")
-        self.model, self.logger = model, logger
-        self.experiment_name = experiment_name
-        self.trajectory_id = str(uuid4()) if trajectory_id is None else trajectory_id
-        self.next_batch = first_batch
-        self.metadata = dict(metadata or {})
+    def __init__(self, model, logger, experiment_name, *, snapshot=default_snapshot):
+        if not experiment_name:
+            raise ValueError("experiment_name is required when logging")
+        self.model, self.logger, self.name = model, logger, experiment_name
+        self.snapshot = snapshot
         self.last_run_id = self.last_prediction_id = None
+        self.trajectory_id = self.dataset_id = None
 
     def __getattr__(self, name):
-        """Forward missing attribute reads and methods, without logging calls.
+        return getattr(self.model, name)
 
-        AttributeError propagates if the model lacks the requested name. Direct
-        base lookup avoids recursive forwarding if ``model`` is not yet set.
+    def configure(
+        self,
+        *,
+        background,
+        target,
+        initial,
+        selector,
+        batch_size,
+        iterations,
+        metadata=None,
+        initial_metrics=None,
+    ):
+        """Register immutable source data and a split, then create one trajectory.
+
+        Ground truth lives in the evaluator/logger; only the observed frame is
+        passed to model.fit. Caller provenance should supply source versions,
+        code commit, preparation recipe, and external split identifiers.
         """
-        return getattr(object.__getattribute__(self, "model"), name)
-
-    def fit(self, observed):
-        """Fit once, persist the retained trace, and return this wrapper.
-
-        Args:
-            observed: Training input forwarded unchanged to ``model.fit``.
-
-        Both last IDs are cleared before fitting. Only a successful log advances
-        ``next_batch`` and sets ``last_run_id``. Fit metadata includes the model's
-        current prediction seed, overriding a caller field of the same name.
-        Model/serialization/database errors propagate; the model may have fitted
-        even if logging fails, but prediction remains disabled in this wrapper.
-        Earlier successful records are not deleted or rolled back.
-        """
-        self.last_run_id = self.last_prediction_id = None
-        self.model.fit(observed)
-        self.last_run_id = self.logger.log_run(
-            self.experiment_name,
-            self.model.inference_data_,
-            trajectory_id=self.trajectory_id,
-            batch_index=self.next_batch,
-            metadata={**self.metadata, "prediction_seed": self.model.prediction_seed},
+        all_data = pd.concat([background, target], ignore_index=True)
+        provenance = dict(metadata or {})
+        self.dataset_id = self.logger.register_dataset(
+            response_records(all_data),
+            description={
+                "response": "viability_lfc",
+                "adapter_schema": 1,
+                "provenance": provenance.get("dataset", {}),
+            },
         )
-        self.next_batch += 1
+        initial_frame = pd.concat([background, initial], ignore_index=True)
+        initial_ids = frame_ids(self.logger, self.dataset_id, initial_frame)
+        target_ids = frame_ids(self.logger, self.dataset_id, target)
+        split = self.logger.create_split(
+            self.dataset_id,
+            initial=initial_ids,
+            pool=sorted(set(target_ids) - set(initial_ids)),
+            definition={"protocol": "background_plus_adaptive_target", "version": 1},
+        )
+        self.family = (
+            "bayesian_factorization"
+            if hasattr(self.model, "inference_data_")
+            else type(self.model).__module__ + "." + type(self.model).__qualname__
+        )
+        config = {
+            "provenance": provenance,
+            "selector": selector.name,
+            "batch_size": batch_size,
+            "iterations": iterations,
+            "initial_compounds": initial["broad_id"].tolist(),
+            "initial_metrics": dict(initial_metrics or {}),
+            "prediction_seed": getattr(self.model, "prediction_seed", None),
+        }
+        # Capture settings, not arbitrary model internals or mutable live references.
+        for label, obj in [
+            ("model", getattr(self.model, "spec", None)),
+            ("sampling", getattr(getattr(self.model, "sampler", None), "config", None)),
+        ]:
+            if hasattr(obj, "model_dump"):
+                config[label] = obj.model_dump(mode="json")
+        rng = getattr(selector, "_rng", None)
+        if rng is not None:
+            config["selector_rng_state"] = rng.bit_generator.state
+        self.trajectory_id = self.logger.start_experiment(
+            self.name, split, model_family=self.family, config=config
+        )
+
+    def fit(self, observed_data):
+        if self.trajectory_id is None:
+            raise RuntimeError("Configure the experiment before fitting")
+        ids = frame_ids(self.logger, self.dataset_id, observed_data)
+        revealed = self.logger.revealed_ids(
+            self.logger.current_state(self.trajectory_id)["data_state_id"]
+        )
+        if not set(ids) <= revealed:
+            raise ValueError("Fit input contains unrevealed responses")
+        # Verify the actual values supplied to fit, not only the identifiers.
+        verify_truth(self.logger, self.dataset_id, observed_data)
+        self.last_run_id = self.last_prediction_id = None
+        aid = self.logger.start_action(
+            self.trajectory_id, "fit", config={"initialization": "fresh"}
+        )
+        try:
+            self.model.fit(observed_data)
+            manifest, artifacts = self.snapshot(self.model, self.logger.artifacts)
+            self.logger.complete_fit(aid, ids, manifest=manifest, artifacts=artifacts)
+        except BaseException as error:
+            self.logger.fail_action(
+                aid,
+                error,
+                interrupted=isinstance(error, (KeyboardInterrupt, SystemExit)),
+            )
+            raise
+        self.last_run_id = aid
         return self
 
-    def predict(self, candidates):
-        """Predict once, persist the output frame, and return it unchanged.
-
-        Args:
-            candidates: Input forwarded unchanged to ``model.predict``.
-
-        Raises:
-            RuntimeError: No fit was successfully recorded through this wrapper.
-
-        Clears ``last_prediction_id`` before attempting the call. Prediction or
-        logging failures propagate, preserving the last fit ID but not a stale
-        prediction ID. Each successful call records the model's current seed.
-        """
-        self.last_prediction_id = None
-        if self.last_run_id is None:
-            raise RuntimeError("Call fit through LoggedModel before predict")
-        prediction = self.model.predict(candidates)
-        self.last_prediction_id = self.logger.log_prediction(
-            self.last_run_id, prediction,
-            metadata={"prediction_seed": self.model.prediction_seed},
+    def begin_acquisition(self, iteration):
+        """Reserve an action before selection so prediction/selector failures are logged."""
+        return self.logger.start_action(
+            self.trajectory_id, "acquire", config={"iteration": iteration}
         )
-        return prediction
+
+    def predict(self, candidate_pairs):
+        result = self.model.predict(candidate_pairs)
+        ids = frame_ids(self.logger, self.dataset_id, result)
+        expected = frame_ids(self.logger, self.dataset_id, candidate_pairs)
+        if ids != expected:
+            raise ValueError("Prediction output must preserve requested response order")
+        records = []
+        known = set(
+            KEYS
+            + [
+                "predicted_mean",
+                "posterior_std",
+                "predictive_std",
+                "interval_lower",
+                "interval_upper",
+            ]
+        )
+        for rid, row in zip(ids, result.to_dict("records")):
+            records.append(
+                {
+                    "response_id": rid,
+                    "point_estimate": row["predicted_mean"],
+                    **{
+                        k: row.get(k)
+                        for k in (
+                            "posterior_std",
+                            "predictive_std",
+                            "interval_lower",
+                            "interval_upper",
+                        )
+                    },
+                    "extra": {k: v for k, v in row.items() if k not in known},
+                }
+            )
+        self.last_prediction_id = self.logger.record_predictions(
+            self.last_run_id,
+            records,
+            metadata={
+                "estimator": (
+                    "posterior_mean"
+                    if self.family == "bayesian_factorization"
+                    else "model_point_estimate"
+                ),
+                "prediction_seed": getattr(self.model, "prediction_seed", None),
+                "interval_level": (
+                    0.9 if self.family == "bayesian_factorization" else None
+                ),
+                "posterior_std_semantics": (
+                    "latent_mean" if self.family == "bayesian_factorization" else None
+                ),
+            },
+        )
+        return result
+
+
+def log_batch(logger, run_id, selected, revealed, metadata=None):
+    """Compatibility socket for the existing simulation's log_batch call.
+
+    This adapter requires complete synchronous reveal, matching simulation.py.
+    Core APIs take IDs directly and do not depend on this DataFrame convention.
+    """
+    info = dataset_for_action(logger, run_id)
+    state = logger.current_state(info["experiment_id"])
+    model = logger.one(
+        "SELECT * FROM model_states WHERE model_state_id=?", (state["model_state_id"],)
+    )
+    if model["producing_action_id"] != run_id:
+        raise ValueError("Batch references a stale model")
+    selected_ids = frame_ids(logger, info["dataset_id"], selected)
+    if (
+        revealed is None
+        or set(frame_ids(logger, info["dataset_id"], revealed)) != set(selected_ids)
+        or len(revealed) != len(selected_ids)
+    ):
+        raise ValueError(
+            "Synchronous acquisition requires one revealed response per selection"
+        )
+    verify_truth(logger, info["dataset_id"], revealed)
+    metadata = dict(metadata or {})
+    config = json.loads(info["config"])
+    aid = metadata.get("acquisition_action_id")
+    if aid is None:
+        aid = logger.start_action(info["experiment_id"], "acquire", config=metadata)
+    elif (
+        logger.one("SELECT experiment_id FROM actions WHERE action_id=?", (aid,))[
+            "experiment_id"
+        ]
+        != info["experiment_id"]
+    ):
+        raise ValueError("Acquisition action belongs to a different experiment")
+    try:
+        metrics = {
+            k: v
+            for k, v in metadata.get("metrics_after", {}).items()
+            if isinstance(v, (int, float, np.number)) and not isinstance(v, bool)
+        }
+        logger.complete_acquisition(
+            aid,
+            selected_ids,
+            prediction_id=metadata.get("last_prediction_id"),
+            policy=config["selector"],
+            requested_size=config["batch_size"],
+            objective=(
+                "minimize" if config["selector"] == "predicted_lowest" else "none"
+            ),
+            metrics=metrics,
+        )
+    except BaseException as error:
+        logger.fail_action(aid, error)
+        raise
+    return aid
