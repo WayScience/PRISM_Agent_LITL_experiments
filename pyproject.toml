@@ -58,7 +58,7 @@ line-length = 100
 minversion = "8.0"
 testpaths = ["tests"]
 addopts = "-q"
-pythonpath = ["agentic_system/src"]
+pythonpath = ["agentic_system/src", "analysis/src"]
 markers = [
     "slow: long-running tests (not run by default)",
     "gpu: requires a CUDA GPU",
