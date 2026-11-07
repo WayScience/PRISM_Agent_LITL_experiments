@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 
 from nbutils.batchie_mono.logger.artifacts import write_inference_data
+from nbutils.batchie_mono.logger.fingerprints import fingerprint_responses
 from nbutils.batchie_mono.logger.response_data import (
     KEYS,
     dataset_for_action,
@@ -111,6 +112,12 @@ class LoggedModel:
         )
         config = {
             "provenance": provenance,
+            "dataset": {
+                "background": fingerprint_responses(background),
+                "target": fingerprint_responses(target),
+                "background_rows": len(background),
+                "target_rows": len(target),
+            },
             "selector": selector.name,
             "batch_size": batch_size,
             "iterations": iterations,

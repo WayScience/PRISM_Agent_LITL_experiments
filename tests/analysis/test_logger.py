@@ -1,6 +1,7 @@
 """Logger behavior and logged/unlogged simulation parity with controlled models."""
 
 import importlib.util
+import json
 from pathlib import Path
 import shutil
 import sqlite3
@@ -271,9 +272,16 @@ class CoreTests(unittest.TestCase):
             )
             for i in range(6)
         ]
-        for process in processes:
-            stdout, stderr = process.communicate(timeout=40)
-            self.assertEqual(process.returncode, 0, stderr)
+        try:
+            for process in processes:
+                stdout, stderr = process.communicate(timeout=40)
+                self.assertEqual(process.returncode, 0, stderr)
+        finally:
+            for process in processes:
+                if process.poll() is None:
+                    process.kill()
+            for process in processes:
+                process.communicate()
         self.assertEqual(
             len(self.log.rows("SELECT * FROM experiments WHERE status='completed'")), 6
         )
@@ -358,7 +366,8 @@ def frames():
 
 
 @unittest.skipUnless(
-    importlib.util.find_spec("arviz"), "ArviZ required for integration tests"
+    all(importlib.util.find_spec(name) for name in ("arviz", "h5netcdf", "h5py")),
+    "ArviZ, h5netcdf, and h5py required for integration tests",
 )
 class IntegrationTests(unittest.TestCase):
     def test_logging_preserves_simulation_and_roundtrips_trace(self):
@@ -487,6 +496,30 @@ class IntegrationTests(unittest.TestCase):
             self.assertEqual(len(result), 1)
             self.assertEqual(len(log.rows("SELECT * FROM experiments")), 2)
             self.assertEqual(len(log.rows("SELECT * FROM actions")), 1)
+
+            metadata = {"dataset": {"source": "test"}}
+            kwargs["initial_compounds"] = target["broad_id"].tolist()
+            model = FakeBayesianModel()
+            result = run_simulation(
+                **kwargs, model=model, iterations=1, metadata=metadata
+            )
+            exp = result.trajectory_id.iloc[0]
+            config = json.loads(log.one(
+                "SELECT config FROM experiments WHERE experiment_id=?", (exp,)
+            )["config"])
+            self.assertEqual(config["dataset"], {
+                "background": fingerprint_responses(background),
+                "target": fingerprint_responses(target),
+                "background_rows": len(background),
+                "target_rows": len(target),
+            })
+            self.assertNotEqual(
+                config["dataset"]["background"], config["dataset"]["target"]
+            )
+            self.assertEqual(config["provenance"], metadata)
+            self.assertEqual(metadata, {"dataset": {"source": "test"}})
+            self.assertEqual(log.candidate_ids(exp), set())
+            self.assertEqual((model.fit_calls, model.predict_calls), (0, 0))
 
 
 if __name__ == "__main__":
