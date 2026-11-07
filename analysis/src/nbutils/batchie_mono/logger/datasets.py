@@ -94,13 +94,20 @@ class DatasetRecords:
         """
         Resolve (cell, drug, dose) keys, preserving caller order.
         """
-        mapping = {
-            (r["cell_id"], r["drug_id"], r["dose"]): r["response_id"]
-            for r in self.rows(
-                "SELECT * FROM responses WHERE dataset_id=?", (dataset_id,)
-            )
-        }
-        return [mapping[tuple(key)] for key in keys]
+        ids = []
+        for key in keys:
+            key = tuple(key)
+            # Retain Python key matching: SQLite may coerce query parameters.
+            mapping = {
+                (r["cell_id"], r["drug_id"], r["dose"]): r["response_id"]
+                for r in self.rows(
+                    "SELECT response_id, cell_id, drug_id, dose FROM responses "
+                    "WHERE dataset_id=? AND cell_id=? AND drug_id=? AND dose=?",
+                    (dataset_id, *key),
+                )
+            }
+            ids.append(mapping[key])
+        return ids
 
     def create_split(
         self, dataset_id: str, *, initial: list[str], pool: list[str], validation: list[str]=(), test: list[str]=(), definition=None
