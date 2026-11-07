@@ -36,7 +36,7 @@ from nbutils.batchie_mono.pymc_backend import PyMCSampler
 from nbutils.batchie_mono.logger import ExperimentLogger
 
 
-# In[ ]:
+# In[2]:
 
 
 repo_root = next(
@@ -246,11 +246,28 @@ metrics = pd.concat([*runs, random_baseline], ignore_index=True)
 metrics.groupby(["selector", "background_cells"]).tail(1)
 
 
-# In[ ]:
+# In[5]:
 
 
 # Reopen the closed bundle: v2 uses experiment/action IDs, not v1 run/batch tables.
 # Restrict checks to this invocation; earlier reruns may share the experiment name.
+def replay_retrieval_metrics(saved, seen, hit_ids):
+    """Recompute retrieval and reject saved metrics inconsistent with revealed IDs."""
+    replayed = {
+        "compounds_seen": len(seen),
+        "top_hits_found": len(seen & hit_ids),
+        "top_hits_total": len(hit_ids),
+        "top_10pct_retrieval": len(seen & hit_ids) / len(hit_ids),
+    }
+    for metric in ("compounds_seen", "top_hits_found", "top_hits_total"):
+        np.testing.assert_equal(saved[metric], replayed[metric], err_msg=metric)
+    np.testing.assert_allclose(
+        saved["top_10pct_retrieval"], replayed["top_10pct_retrieval"],
+        rtol=1e-12, atol=0, err_msg="top_10pct_retrieval",
+    )
+    return {**saved, **replayed}
+
+
 reloaded_records = []
 reload_checks = []
 trajectory_ids = metrics["trajectory_id"].unique().tolist()
@@ -301,7 +318,7 @@ with ExperimentLogger(db_path) as logger:
             (trajectory_id,),
         )
         seen = logger.revealed_ids(initial_state["data_state_id"]) & set(target["response_id"])
-        rows = [dict(config["initial_metrics"])]
+        rows = [replay_retrieval_metrics(config["initial_metrics"], seen, hit_ids)]
         for action in acquisitions.to_dict("records"):
             batch = logger.one(
                 "SELECT * FROM acquisitions WHERE action_id=?", (action["action_id"],)
@@ -318,6 +335,7 @@ with ExperimentLogger(db_path) as logger:
                 "SELECT * FROM evaluations WHERE action_id=? AND scope='simulation'",
                 (action["action_id"],),
             )}
+            values = replay_retrieval_metrics(values, seen, hit_ids)
 
             if config["selector"] != "random":
 
