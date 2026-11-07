@@ -205,7 +205,13 @@ class LoggedModel:
                             "interval_upper",
                         )
                     },
-                    "extra": {k: v for k, v in row.items() if k not in known},
+                    "extra": {
+                        k: None
+                        if isinstance(v, (float, np.floating)) and np.isnan(v)
+                        else v
+                        for k, v in row.items()
+                        if k not in known
+                    },
                 }
             )
         self.last_prediction_id = self.logger.record_predictions(

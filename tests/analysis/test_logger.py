@@ -167,6 +167,39 @@ class CoreTests(unittest.TestCase):
             "running",
         )
 
+    def test_logged_prediction_nan_extras_preserve_valid_values(self):
+        from nbutils.batchie_mono.logger.integration import LoggedModel
+
+        pairs = pd.DataFrame(
+            [["c", "1", 1.0]], columns=["ModelID", "broad_id", "dose"]
+        )
+        extras = {
+            "missing": float("nan"),
+            "numpy_missing": np.float32("nan"),
+            "finite": 1.25,
+            "integer": 2,
+            "boolean": False,
+            "text": "NaN",
+            "null": None,
+            "list": [1, "two"],
+            "object": {"value": 3},
+        }
+        result = pairs.assign(predicted_mean=-0.5)
+        for key, value in extras.items():
+            result[key] = pd.Series([value], dtype=object)
+        before = result.copy(deep=True)
+        model = FakeBayesianModel()
+        wrapped = LoggedModel(model, self.log, "test")
+        wrapped.dataset_id = self.dataset
+        wrapped.last_run_id = fitted(self.log, self.exp, self.ids[:1])
+        wrapped.family = "test"
+        with patch.object(model, "predict", return_value=result) as predict:
+            self.assertIs(wrapped.predict(pairs), result)
+            predict.assert_called_once_with(pairs)
+        saved = json.loads(self.log.one("SELECT extra FROM prediction_values")["extra"])
+        self.assertEqual(saved, {**extras, "missing": None, "numpy_missing": None})
+        pd.testing.assert_frame_equal(result, before)
+
     def test_strict_constraints_and_missingness(self):
         with self.assertRaises(sqlite3.IntegrityError):
             self.log.connection.execute("UPDATE responses SET value='not numeric'")
