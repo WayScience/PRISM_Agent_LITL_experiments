@@ -1,6 +1,6 @@
 """Response-data fingerprints, independent of model integration and logging."""
 
-from nbutils.batchie_mono.logger._storage import digest
+from nbutils.batchie_mono.logger._storage import digest, encode
 from nbutils.batchie_mono.logger.response_data import response_records
 
 
@@ -12,5 +12,5 @@ def fingerprint_responses(frame):
     """
     records = response_records(frame)
     return digest(
-        sorted(records, key=lambda r: (r["cell_id"], r["drug_id"], r["dose"]))
+        sorted(records, key=lambda r: (r["cell_id"], r["drug_id"], r["dose"], encode(r)))
     )

@@ -14,7 +14,7 @@ from unittest.mock import patch
 import numpy as np
 import pandas as pd
 
-from nbutils.batchie_mono.logger import ExperimentLogger
+from nbutils.batchie_mono.logger import ExperimentLogger, fingerprint_responses
 from nbutils.batchie_mono.simulation import run_simulation
 from nbutils.batchie_mono.model_acquisition import (
     PredictedLowestSelector,
@@ -45,6 +45,22 @@ def fitted(logger, exp, ids):
 
 
 class CoreTests(unittest.TestCase):
+    def test_fingerprint_duplicate_identities_are_order_independent(self):
+        for values in ([1.0, 2.0], [-0.0, 0.0]):
+            with self.subTest(values=values):
+                frame = pd.DataFrame(
+                    {
+                        "ModelID": ["c", "c"],
+                        "broad_id": ["drug", "drug"],
+                        "dose": [1.0, 1.0],
+                        "logfold_change": values,
+                    }
+                )
+                self.assertEqual(
+                    fingerprint_responses(frame),
+                    fingerprint_responses(frame.iloc[::-1]),
+                )
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.path = Path(self.tmp.name) / "experiment.sqlite"
@@ -54,6 +70,24 @@ class CoreTests(unittest.TestCase):
     def tearDown(self):
         self.log.close()
         self.tmp.cleanup()
+
+    def test_response_ids_query_only_requested_keys_in_caller_order(self):
+        keys = [("c", "3", 1), ("c", "1", 1), ("c", "3", 1)]
+        with patch.object(self.log, "rows", wraps=self.log.rows) as rows:
+            self.assertEqual(
+                self.log.response_ids(self.dataset, keys),
+                [self.ids[3], self.ids[1], self.ids[3]],
+            )
+            for call, key in zip(rows.call_args_list, keys):
+                sql, parameters = call.args
+                self.assertEqual(parameters, (self.dataset, *key))
+                self.assertIn(
+                    "WHERE dataset_id=? AND cell_id=? AND drug_id=? AND dose=?", sql
+                )
+            self.assertEqual(rows.call_count, len(keys))
+            rows.reset_mock()
+            self.assertEqual(self.log.response_ids(self.dataset, []), [])
+            rows.assert_not_called()
 
     def test_trajectory_predictions_errors_and_reconstruction(self):
         initial = self.log.current_state(self.exp)
@@ -139,8 +173,16 @@ class CoreTests(unittest.TestCase):
             self.log.register_dataset(
                 [dict(cell_id="c", drug_id="d", dose=1, value=float("nan"))]
             )
-        with self.assertRaises(KeyError):
-            self.log.response_ids(self.dataset, [("missing", "pair", 1)])
+        for key in [
+            ("missing", "pair", 1),
+            ("C", "1", 1),
+            ("c", 1, 1),
+            ("c", "1", "1"),
+            ("c", "1", 1.0000000000000002),
+        ]:
+            with self.subTest(key=key), self.assertRaises(KeyError) as raised:
+                self.log.response_ids(self.dataset, [key])
+            self.assertEqual(raised.exception.args, (key,))
         with self.assertRaises(ValueError):
             self.log.create_split(self.dataset, initial=self.ids[:1], pool=self.ids[:1])
         self.assertEqual(
@@ -289,7 +331,9 @@ class FakeBayesianModel:
             posterior={"offset": np.arange(12, dtype=float).reshape(2, 6)},
             sample_stats={"diverging": np.zeros((2, 6), dtype=bool)},
         )
-        self.inference_data_.attrs.update(model_config='{"rank":2}', backend="test")
+        self.inference_data_.attrs.update(
+            model_config='{"rank":2}', backend="test", numeric_array=np.array([1.0, 2.0])
+        )
         return self
 
     def predict(self, pairs):
@@ -353,7 +397,20 @@ class IntegrationTests(unittest.TestCase):
                         pd.testing.assert_frame_equal(a, b)
                     fits = log.rows("SELECT action_id FROM actions WHERE kind='fit'")
                     self.assertEqual(len(fits), 2)
-                    _, trace = log.load_run(fits[-1]["action_id"])
+                    metadata, trace = log.load_run(fits[-1]["action_id"])
+                    self.assertEqual(
+                        metadata["manifest"]["trace_metadata"]["numeric_array"], [1.0, 2.0]
+                    )
+                    self.assertEqual(
+                        metadata["manifest"]["trace_metadata"]["model_config"], {"rank": 2}
+                    )
+                    np.testing.assert_array_equal(
+                        trace.attrs["numeric_array"],
+                        logged.inference_data_.attrs["numeric_array"],
+                    )
+                    self.assertIsInstance(
+                        logged.inference_data_.attrs["numeric_array"], np.ndarray
+                    )
                     np.testing.assert_array_equal(
                         trace.posterior.offset, logged.inference_data_.posterior.offset
                     )

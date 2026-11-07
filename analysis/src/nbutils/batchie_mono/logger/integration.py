@@ -33,6 +33,10 @@ def default_snapshot(model, store):
     for field in ("model_config", "inference_config"):
         if isinstance(attrs.get(field), str):
             attrs[field] = json.loads(attrs[field])
+    attrs = {
+        key: value.tolist() if isinstance(value, np.ndarray) else value
+        for key, value in attrs.items()
+    }
     artifact = write_inference_data(store, trace)
     return {
         "schema_version": 1,
