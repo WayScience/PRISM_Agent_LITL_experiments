@@ -48,7 +48,7 @@ class ArtifactStore:
             temp = Path(f.name)
         try:
             writer(temp)
-            with temp.open("rb") as f:
+            with temp.open("rb+") as f:
                 os.fsync(f.fileno())
                 checksum = sha256()
                 for block in iter(lambda: f.read(1024 * 1024), b""):
