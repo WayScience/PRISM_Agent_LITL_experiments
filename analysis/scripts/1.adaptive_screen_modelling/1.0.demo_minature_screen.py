@@ -198,6 +198,16 @@ provenance = {
 }
 # V1 logs are intentionally not migrated or overwritten.
 db_path = repo_root / "output" / "miniature_screen_v2.sqlite"
+if db_path.exists():
+    # remove the existing database to start fresh for demo
+    db_path.unlink()
+    artifacts_dir = db_path.parent / "artifacts"
+    if artifacts_dir.exists():
+        # remove entire artifacts directory
+        for artifact in artifacts_dir.iterdir():
+            artifact.unlink()
+        artifacts_dir.rmdir()
+
 experiment_name = "miniature-background-ablation"
 runs = []
 fitted_models = {}  # Retain only each trajectory's last model for round-trip checks.
