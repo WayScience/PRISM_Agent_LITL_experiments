@@ -7,7 +7,7 @@ authors = [{ name = "Weishan Li" }]
 
 [project.optional-dependencies]
 pymc = ["pymc>=5.28.0,<6"]
-gibbs = ["numpy", "pandas", "scipy", "arviz>=0.21.0,<1.0.0", "threadpoolctl"]
+gibbs = ["numpy", "pandas", "scipy", "arviz>=0.21.0,<1.0.0", "threadpoolctl", "pyarrow"]
 logger = ["numpy", "pandas", "arviz>=0.21.0,<1.0.0", "h5netcdf", "h5py"]
 
 [build-system]
