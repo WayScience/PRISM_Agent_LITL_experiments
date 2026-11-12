@@ -29,14 +29,32 @@ class BatchSelector(ABC):
 
 
 class RandomSelector(BatchSelector):
-    """Uniform sampling without replacement; RNG advances between rounds."""
+    """
+    Uniform sampling without replacement; RNG advances between rounds.
+    Doesn't depend on the trained factorization model but the model argument
+        is included for API consistency.
+    """
 
     name = "random"
 
     def __init__(self, seed: int = 0) -> None:
+        """
+        Initialize the random selector with an optional seed for reproducibility.
+
+        :param seed: Optional random seed for reproducibility.
+        """
         self._rng = np.random.default_rng(seed)
 
     def select(self, *, model, candidate_pairs, evaluation_pairs, batch_size) -> list[str]:
+        """
+        Select compounds randomly from the candidate pairs.
+
+        :param model: The response model (not used in random selection).
+        :param candidate_pairs: DataFrame containing candidate compound-target pairs.
+        :param evaluation_pairs: DataFrame containing evaluation compound-target pairs.
+        :param batch_size: Number of compounds to select.
+        :return: List of selected compound IDs as strings.
+        """
         compounds = np.sort(candidate_pairs[COMPOUND_COLUMN].unique())
         selected = self._rng.choice(
             compounds, size=min(batch_size, len(compounds)), replace=False
@@ -45,11 +63,22 @@ class RandomSelector(BatchSelector):
 
 
 class PredictedLowestSelector(BatchSelector):
-    """Greedily select lowest predicted LFC (strongest predicted killing)."""
+    """
+    Greedily select lowest predicted LFC (strongest predicted killing).
+    """
 
     name = "predicted_lowest"
 
     def select(self, *, model, candidate_pairs, evaluation_pairs, batch_size) -> list[str]:
+        """
+        Select the compounds with the lowest predicted LFC values.
+
+        :param model: The response model used for prediction.
+        :param candidate_pairs: DataFrame containing candidate compound-target pairs.
+        :param evaluation_pairs: DataFrame containing evaluation compound-target pairs.
+        :param batch_size: Number of compounds to select.
+        :return: List of selected compound IDs as strings.
+        """
         return (
             model.predict(candidate_pairs)
             .sort_values(["predicted_mean", COMPOUND_COLUMN])
